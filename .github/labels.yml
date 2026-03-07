@@ -1,0 +1,57 @@
+- name: "type:bug"
+  color: "D73A4A"
+  description: Bug or regression.
+- name: "type:feature"
+  color: "0E8A16"
+  description: New feature request.
+- name: "type:task"
+  color: "1D76DB"
+  description: Engineering task/work item.
+- name: "status:triage"
+  color: "FBCA04"
+  description: Needs triage.
+- name: "status:ready"
+  color: "0E8A16"
+  description: Ready to start.
+- name: "status:in-progress"
+  color: "0052CC"
+  description: Work started.
+- name: "status:blocked"
+  color: "B60205"
+  description: Blocked by dependency.
+- name: "status:review"
+  color: "5319E7"
+  description: In code review.
+- name: "status:done"
+  color: "0E8A16"
+  description: Completed.
+- name: "priority:p0"
+  color: "B60205"
+  description: Critical.
+- name: "priority:p1"
+  color: "D93F0B"
+  description: High.
+- name: "priority:p2"
+  color: "FBCA04"
+  description: Medium.
+- name: "priority:p3"
+  color: "C2E0C6"
+  description: Low.
+- name: "area:billing"
+  color: "C5DEF5"
+  description: Billing/POS.
+- name: "area:medicine"
+  color: "C5DEF5"
+  description: Medicine master.
+- name: "area:purchase"
+  color: "C5DEF5"
+  description: Purchase/suppliers.
+- name: "area:customers"
+  color: "C5DEF5"
+  description: Customers/doctors.
+- name: "area:reports"
+  color: "C5DEF5"
+  description: Reports/finance.
+- name: "area:infra"
+  color: "C5DEF5"
+  description: Tooling/CI/devops.

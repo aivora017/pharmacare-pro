@@ -1,0 +1,82 @@
+[package]
+name = "pharmacare-pro"
+version = "1.0.0"
+description = "PharmaCare Pro - Pharmacy Management System"
+authors = ["Your Name"]
+license = "Proprietary"
+repository = ""
+edition = "2021"
+
+# Do not publish to crates.io
+publish = false
+
+[lib]
+name = "pharmacare_pro_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# ── Tauri Core ────────────────────────────────────────────────
+tauri = { version = "2", features = [] }
+tauri-plugin-keyring       = "2"        # OS keychain for secrets
+tauri-plugin-shell         = "2"        # Shell access
+tauri-plugin-updater       = "2"        # Auto-updates
+tauri-plugin-dialog        = "2"        # File open/save dialogs
+tauri-plugin-fs            = "2"        # File system
+tauri-plugin-notification  = "2"        # Desktop notifications
+
+# ── Database ──────────────────────────────────────────────────
+rusqlite = { version = "0.31", features = ["bundled", "backup", "sqlcipher"] }
+# sqlcipher = database encryption (AES-256)
+
+# ── Async Runtime ─────────────────────────────────────────────
+tokio = { version = "1", features = ["full"] }
+
+# ── Serialisation ─────────────────────────────────────────────
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# ── Security ──────────────────────────────────────────────────
+bcrypt = "0.15"                          # Password hashing
+jsonwebtoken = "9"                       # JWT generation and validation
+uuid = { version = "1", features = ["v4"] }  # UUID for session IDs
+aes-gcm = "0.10"                         # AES-256-GCM for data encryption
+rand = "0.8"
+
+# ── Email (IMAP) ──────────────────────────────────────────────
+# Note: IMAP is handled in the frontend via imapflow (Node.js)
+# Rust handles file parsing for performance
+
+# ── Date & Time ───────────────────────────────────────────────
+chrono = { version = "0.4", features = ["serde"] }
+
+# ── Error Handling ────────────────────────────────────────────
+thiserror = "1"
+anyhow = "1"
+
+# ── Logging ───────────────────────────────────────────────────
+log = "0.4"
+env_logger = "0.11"
+
+# ── Barcode Generation ────────────────────────────────────────
+# Note: Barcodes are generated in frontend (JsBarcode)
+# Rust validates and stores barcode strings
+
+[features]
+# Enable Tauri development features (hot reload, devtools)
+# These are OFF in production builds
+custom-protocol = ["tauri/custom-protocol"]
+
+[profile.release]
+# Optimise release builds for size (important for distribution)
+opt-level = "s"     # Optimise for size
+lto = true          # Link-time optimisation
+codegen-units = 1   # Better optimisation
+strip = true        # Remove debug symbols
+panic = "abort"
+
+[profile.dev]
+# Faster compilation during development
+incremental = true

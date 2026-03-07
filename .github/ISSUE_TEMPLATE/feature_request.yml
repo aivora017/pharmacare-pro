@@ -1,0 +1,76 @@
+name: Feature Request
+description: Propose a new feature or enhancement.
+title: "[FEATURE] "
+labels: ["type:feature", "status:triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the business problem first, then the proposed solution.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem Statement
+      description: What problem does this solve for pharmacy staff?
+      placeholder: Staff cannot quickly identify near-expiry stock at billing time.
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      placeholder: Show amber badge on POS row when expiry is under 30 days.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: module
+    attributes:
+      label: Module
+      options:
+        - Auth
+        - Dashboard
+        - Billing
+        - Medicine
+        - Purchase
+        - Customers
+        - Suppliers
+        - Expiry
+        - Barcodes
+        - Reports
+        - Settings
+        - AI
+        - Infrastructure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      options:
+        - P0
+        - P1
+        - P2
+        - P3
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance Criteria
+      placeholder: |
+        - Given ..., when ..., then ...
+        - Performance target met (if relevant)
+        - Permission checks handled
+    validations:
+      required: true
+
+  - type: textarea
+    id: non_goals
+    attributes:
+      label: Non-Goals
+      description: Clarify what is out of scope.

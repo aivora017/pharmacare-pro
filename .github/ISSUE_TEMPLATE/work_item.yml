@@ -1,0 +1,61 @@
+name: Work Item
+description: Create a tracked engineering task.
+title: "[TASK] "
+labels: ["type:task", "status:ready"]
+body:
+  - type: input
+    id: outcome
+    attributes:
+      label: Outcome
+      description: What should be true after this task is done?
+      placeholder: Billing save flow writes bills + bill_items + payments in one transaction.
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      placeholder: |
+        In scope:
+        - ...
+
+        Out of scope:
+        - ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: implementation
+    attributes:
+      label: Implementation Notes
+      placeholder: Mention files, commands, and migration needs.
+
+  - type: textarea
+    id: test_plan
+    attributes:
+      label: Test Plan
+      placeholder: |
+        - Unit tests:
+        - Manual verification:
+        - Regression checks:
+    validations:
+      required: true
+
+  - type: input
+    id: estimate
+    attributes:
+      label: Estimate
+      placeholder: 1d / 3d / 1w
+
+  - type: checkboxes
+    id: dod
+    attributes:
+      label: Definition of Done
+      options:
+        - label: Code merged with review approval
+          required: true
+        - label: Tests added or updated
+          required: true
+        - label: Docs/TODO updated
+          required: true

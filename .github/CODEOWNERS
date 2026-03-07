@@ -1,0 +1,11 @@
+# Default reviewers for all files
+* @YOUR_GITHUB_USERNAME
+
+# Frontend
+/src/ @YOUR_GITHUB_USERNAME
+
+# Backend (Tauri/Rust)
+/src-tauri/ @YOUR_GITHUB_USERNAME
+
+# CI and project governance
+/.github/ @YOUR_GITHUB_USERNAME
