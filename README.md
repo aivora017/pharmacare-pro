@@ -8,6 +8,7 @@
 This repository is configured to run as a live production project on GitHub.
 
 - Delivery roadmap: `docs/DELIVERY_PLAN.md`
+- Workflow + MVP execution plan: `docs/WORKFLOW_AND_MVP_EXECUTION_PLAN.md`
 - GitHub tracking setup: `docs/GITHUB_LIVE_PROJECT_SETUP.md`
 - Contribution rules: `CONTRIBUTING.md`
 - Security process: `SECURITY.md`
