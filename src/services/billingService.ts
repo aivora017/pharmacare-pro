@@ -17,7 +17,7 @@
  */
 
 import { invoke } from '@tauri-apps/api/core'
-import type { ICartItem, IBill, IPayment, ICustomer } from '@/types'
+import type { ICartItem, IBill, ICustomer } from '@/types'
 
 interface CreateBillInput {
   customer_id?: number
