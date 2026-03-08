@@ -14,35 +14,33 @@
  * 6. Drug interaction check when adding each item
  * 7. Call billingService.createBill() on payment confirm
  */
-import { useState, useEffect, useRef } from "react"
-import { ShoppingCart, Search, User, PauseCircle } from "lucide-react"
-import toast from "react-hot-toast"
-import { useCartStore } from "@/store/cartStore"
-import { useAuthStore } from "@/store/authStore"
-import { billingService } from "@/services/billingService"
-import { formatCurrency } from "@/utils/currency"
+import { useState, useEffect, useRef } from 'react'
+import { ShoppingCart, Search, User, PauseCircle } from 'lucide-react'
+import toast from 'react-hot-toast'
+import { useCartStore } from '@/store/cartStore'
+import { billingService } from '@/services/billingService'
+import { formatCurrency } from '@/utils/currency'
 
 export default function BillingPage() {
   const searchRef = useRef<HTMLInputElement>(null)
-  const [searchQuery, setSearchQuery] = useState("")
-  const [showPayment, setShowPayment] = useState(false)
-  const { user } = useAuthStore()
-  const { items, customer, totals, removeItem, updateQuantity, updateItemDiscount, setCustomer, clear } = useCartStore()
+  const [searchQuery, setSearchQuery] = useState('')
+  const [, setShowPayment] = useState(false)
+  const { items, customer, totals, removeItem, updateQuantity, updateItemDiscount, clear } =
+    useCartStore()
 
-  useEffect(() => { searchRef.current?.focus() }, [])
   useEffect(() => {
-    const h = (e: KeyboardEvent) => { if (e.key === "F7" && items.length > 0) { e.preventDefault(); setShowPayment(true) } }
-    window.addEventListener("keydown", h); return () => window.removeEventListener("keydown", h)
+    searchRef.current?.focus()
+  }, [])
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      if (e.key === 'F7' && items.length > 0) {
+        e.preventDefault()
+        setShowPayment(true)
+      }
+    }
+    window.addEventListener('keydown', h)
+    return () => window.removeEventListener('keydown', h)
   }, [items.length])
-
-  const handleSave = async (payments: { amount: number; payment_mode: string; reference_no?: string }[]) => {
-    try {
-      const id = await billingService.createBill({ items, payments, discount_amount: totals.bill_discount, created_by: user!.id, customer_id: customer?.id })
-      clear(); setShowPayment(false)
-      toast.success(`Bill #${id} saved! Printing receipt...`)
-      // Copilot: call printerService.printBill(id, "thermal") here
-    } catch { toast.error("Could not save bill. Please try again.") }
-  }
 
   return (
     <div className="flex h-full bg-slate-50 -m-4 overflow-hidden">
@@ -53,14 +51,26 @@ export default function BillingPage() {
             <h1 className="font-bold text-slate-800">New Bill</h1>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={() => {/* Copilot: open CustomerSelector */}}
-              className="flex items-center gap-1.5 px-3 py-2 text-sm border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors min-h-touch">
-              <User size={14} />{customer ? customer.name : "Add Customer (F6)"}
+            <button
+              onClick={() => {
+                /* Copilot: open CustomerSelector */
+              }}
+              className="flex items-center gap-1.5 px-3 py-2 text-sm border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors min-h-touch"
+            >
+              <User size={14} />
+              {customer ? customer.name : 'Add Customer (F6)'}
             </button>
             {items.length > 0 && (
-              <button onClick={async () => { await billingService.holdBill({ items, customer }); clear(); toast.success("Bill held.") }}
-                className="flex items-center gap-1.5 px-3 py-2 text-sm border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors min-h-touch">
-                <PauseCircle size={14} />Hold<kbd className="ml-1 text-slate-400 text-xs font-mono">F4</kbd>
+              <button
+                onClick={async () => {
+                  await billingService.holdBill({ items, customer })
+                  clear()
+                  toast.success('Bill held.')
+                }}
+                className="flex items-center gap-1.5 px-3 py-2 text-sm border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors min-h-touch"
+              >
+                <PauseCircle size={14} />
+                Hold<kbd className="ml-1 text-slate-400 text-xs font-mono">F4</kbd>
               </button>
             )}
           </div>
@@ -68,9 +78,14 @@ export default function BillingPage() {
         <div className="px-4 py-3 bg-white border-b border-slate-200">
           <div className="relative">
             <Search size={17} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input ref={searchRef} value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
-              placeholder="Type medicine name or scan barcode to add..." autoComplete="off"
-              className="w-full pl-10 pr-4 py-3 text-sm border-2 border-blue-200 focus:border-blue-500 rounded-xl outline-none bg-blue-50 focus:bg-white transition-colors" />
+            <input
+              ref={searchRef}
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Type medicine name or scan barcode to add..."
+              autoComplete="off"
+              className="w-full pl-10 pr-4 py-3 text-sm border-2 border-blue-200 focus:border-blue-500 rounded-xl outline-none bg-blue-50 focus:bg-white transition-colors"
+            />
           </div>
           {/* Copilot: render MedicineSearchDropdown here when searchQuery.length >= 2 */}
           {/* File: src/pages/Billing/components/MedicineSearchDropdown.tsx */}
@@ -98,30 +113,64 @@ export default function BillingPage() {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {items.map((item, i) => (
-                  <tr key={i} className={item.is_near_expiry ? "bg-amber-50" : "hover:bg-slate-50"}>
+                  <tr key={i} className={item.is_near_expiry ? 'bg-amber-50' : 'hover:bg-slate-50'}>
                     <td className="px-4 py-3">
                       <p className="font-medium text-slate-800">{item.medicine_name}</p>
                       <p className="text-xs text-slate-400">Batch: {item.batch_number}</p>
-                      {item.is_near_expiry && <span className="text-xs text-amber-600 font-medium">⚠ Near expiry</span>}
+                      {item.is_near_expiry && (
+                        <span className="text-xs text-amber-600 font-medium">⚠ Near expiry</span>
+                      )}
                     </td>
-                    <td className="px-2 py-3 text-center text-xs text-slate-500">{item.expiry_date}</td>
+                    <td className="px-2 py-3 text-center text-xs text-slate-500">
+                      {item.expiry_date}
+                    </td>
                     <td className="px-2 py-3">
                       <div className="flex items-center justify-center gap-1">
-                        <button onClick={() => updateQuantity(i, item.quantity - 1)} className="w-6 h-6 rounded border border-slate-300 flex items-center justify-center hover:bg-slate-100 text-slate-700">−</button>
-                        <input type="number" min={1} value={item.quantity} onChange={e => updateQuantity(i, parseInt(e.target.value)||1)}
-                          className="w-12 text-center border border-slate-300 rounded text-sm py-0.5 outline-none focus:ring-1 focus:ring-blue-500" />
-                        <button onClick={() => updateQuantity(i, item.quantity + 1)} className="w-6 h-6 rounded border border-slate-300 flex items-center justify-center hover:bg-slate-100 text-slate-700">+</button>
+                        <button
+                          onClick={() => updateQuantity(i, item.quantity - 1)}
+                          className="w-6 h-6 rounded border border-slate-300 flex items-center justify-center hover:bg-slate-100 text-slate-700"
+                        >
+                          −
+                        </button>
+                        <input
+                          type="number"
+                          min={1}
+                          value={item.quantity}
+                          onChange={(e) => updateQuantity(i, parseInt(e.target.value) || 1)}
+                          className="w-12 text-center border border-slate-300 rounded text-sm py-0.5 outline-none focus:ring-1 focus:ring-blue-500"
+                        />
+                        <button
+                          onClick={() => updateQuantity(i, item.quantity + 1)}
+                          className="w-6 h-6 rounded border border-slate-300 flex items-center justify-center hover:bg-slate-100 text-slate-700"
+                        >
+                          +
+                        </button>
                       </div>
                     </td>
                     <td className="px-2 py-3 text-right text-slate-700">₹{item.unit_price}</td>
                     <td className="px-2 py-3">
-                      <input type="number" min={0} max={100} value={item.discount_percent} onChange={e => updateItemDiscount(i, parseFloat(e.target.value)||0)}
-                        className="w-16 text-center border border-slate-300 rounded text-sm py-0.5 outline-none focus:ring-1 focus:ring-blue-500" />
+                      <input
+                        type="number"
+                        min={0}
+                        max={100}
+                        value={item.discount_percent}
+                        onChange={(e) => updateItemDiscount(i, parseFloat(e.target.value) || 0)}
+                        className="w-16 text-center border border-slate-300 rounded text-sm py-0.5 outline-none focus:ring-1 focus:ring-blue-500"
+                      />
                     </td>
-                    <td className="px-2 py-3 text-right text-xs text-slate-500">₹{(item.cgst_amount+item.sgst_amount+item.igst_amount).toFixed(2)}</td>
-                    <td className="px-4 py-3 text-right font-semibold text-slate-800">₹{item.total_amount.toFixed(2)}</td>
+                    <td className="px-2 py-3 text-right text-xs text-slate-500">
+                      ₹{(item.cgst_amount + item.sgst_amount + item.igst_amount).toFixed(2)}
+                    </td>
+                    <td className="px-4 py-3 text-right font-semibold text-slate-800">
+                      ₹{item.total_amount.toFixed(2)}
+                    </td>
                     <td className="px-2 py-3">
-                      <button onClick={() => removeItem(i)} className="text-slate-300 hover:text-red-500 text-lg leading-none">×</button>
+                      <button
+                        onClick={() => removeItem(i)}
+                        className="text-slate-300 hover:text-red-500 text-lg leading-none"
+                      >
+                        ×
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -133,16 +182,25 @@ export default function BillingPage() {
           <div className="bg-white border-t border-slate-200 px-4 py-3">
             <div className="flex items-end justify-between">
               <div className="text-sm text-slate-600 space-y-0.5">
-                <p>Subtotal: ₹{totals.subtotal.toFixed(2)} &nbsp;|&nbsp; GST: ₹{totals.total_gst.toFixed(2)}</p>
-                {totals.item_discount > 0 && <p className="text-green-600">Discount: -₹{totals.item_discount.toFixed(2)}</p>}
+                <p>
+                  Subtotal: ₹{totals.subtotal.toFixed(2)} &nbsp;|&nbsp; GST: ₹
+                  {totals.total_gst.toFixed(2)}
+                </p>
+                {totals.item_discount > 0 && (
+                  <p className="text-green-600">Discount: -₹{totals.item_discount.toFixed(2)}</p>
+                )}
               </div>
               <div className="flex items-center gap-4">
                 <div className="text-right">
                   <p className="text-xs text-slate-400">Total Amount</p>
-                  <p className="text-3xl font-bold text-slate-900">{formatCurrency(totals.net_amount)}</p>
+                  <p className="text-3xl font-bold text-slate-900">
+                    {formatCurrency(totals.net_amount)}
+                  </p>
                 </div>
-                <button onClick={() => setShowPayment(true)}
-                  className="h-14 px-8 bg-green-600 hover:bg-green-700 text-white font-bold rounded-xl shadow flex items-center gap-2">
+                <button
+                  onClick={() => setShowPayment(true)}
+                  className="h-14 px-8 bg-green-600 hover:bg-green-700 text-white font-bold rounded-xl shadow flex items-center gap-2"
+                >
                   Collect Payment <kbd className="text-green-200 text-xs font-mono">F7</kbd>
                 </button>
               </div>
@@ -151,7 +209,6 @@ export default function BillingPage() {
         )}
       </div>
       {/* Copilot: mount PaymentPanel when showPayment=true */}
-      {/* <PaymentPanel netAmount={totals.net_amount} onConfirm={handleSave} onClose={() => setShowPayment(false)} /> */}
     </div>
   )
 }

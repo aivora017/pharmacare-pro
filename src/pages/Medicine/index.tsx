@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react'
+import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
 import toast from 'react-hot-toast'
 import {
   type IBatchItem,
@@ -83,7 +83,7 @@ export default function MedicinePage() {
   const [batchQuantity, setBatchQuantity] = useState(1)
   const [batchRack, setBatchRack] = useState('')
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true)
     try {
       const [medicineRows, categoryRows] = await Promise.all([
@@ -102,9 +102,9 @@ export default function MedicinePage() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [categoryId, inStockOnly, query, sort])
 
-  const loadDetail = async (id: number) => {
+  const loadDetail = useCallback(async (id: number) => {
     setDetailLoading(true)
     try {
       const [medicine, batchRows] = await Promise.all([
@@ -126,17 +126,17 @@ export default function MedicinePage() {
     } finally {
       setDetailLoading(false)
     }
-  }
+  }, [])
 
   useEffect(() => {
     void load()
-  }, [query, categoryId, inStockOnly, sort])
+  }, [load])
 
   useEffect(() => {
     if (selectedId) {
       void loadDetail(selectedId)
     }
-  }, [selectedId])
+  }, [selectedId, loadDetail])
 
   const lowStockCount = useMemo(
     () => items.filter((m) => m.total_stock <= m.reorder_level).length,

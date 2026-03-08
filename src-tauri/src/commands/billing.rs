@@ -19,7 +19,7 @@
 //! 11. COMMIT; return new bill_id
 
 use crate::{AppState, error::AppError};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use tauri::State;
 
 #[derive(Debug, Deserialize)]
