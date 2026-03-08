@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { calculateGST } from './gst'
+import { calculateItemGST } from './gst'
 
-describe('calculateGST', () => {
+describe('calculateItemGST', () => {
   it('computes a valid item total shape', () => {
-    const result = calculateGST({
+    const result = calculateItemGST({
       quantity: 2,
       unit_price: 100,
       discount_percent: 0,

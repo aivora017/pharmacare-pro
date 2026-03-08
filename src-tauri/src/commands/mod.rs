@@ -1,0 +1,14 @@
+pub mod auth;
+pub mod billing;
+pub mod medicine;
+pub mod purchase;
+pub mod customer;
+pub mod inventory;
+pub mod barcode;
+pub mod email_import;
+pub mod printer;
+pub mod reports;
+pub mod backup;
+pub mod license;
+pub mod ai_commands;
+pub mod settings;

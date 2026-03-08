@@ -1,96 +1,44 @@
 # PharmaCare Pro — GitHub Copilot Instructions
 
-## Project Overview
-PharmaCare Pro is a **cross-platform desktop pharmacy management system** built with:
-- **Framework**: Tauri 2.0 (Rust backend) + React 18 + TypeScript
-- **Database**: SQLite via `better-sqlite3` (local, embedded, no server needed)
-- **Styling**: Tailwind CSS + shadcn/ui components
-- **State**: Zustand for global state
-- **Target Users**: Non-IT pharmacy staff — UI must be extremely simple and self-explanatory
+## Project Summary
+Cross-platform desktop pharmacy management app. Tauri 2.0 (Rust) + React 18 + TypeScript + SQLite.
+Target: Indian pharmacy staff who are NOT IT people — UI must be dead simple, no training required.
 
-## Core Design Principles
-1. **Simplicity First** — Every screen must be usable by someone who has never used software before
-2. **Offline First** — Everything works without internet. Cloud AI features are clearly marked optional
-3. **Lightweight** — Total RAM usage must stay under 200MB. Use lazy loading everywhere
-4. **Fast** — POS screen must respond in under 100ms. Search must return results under 50ms
-5. **Safe** — All data is encrypted. All actions are logged. All user inputs are validated
+## Architecture (ALWAYS follow this chain)
+Component → Service (src/services/) → invoke() → Tauri Command (Rust) → SQLite → Result
 
-## Naming Conventions
-- Components: `PascalCase` (e.g., `MedicineCard.tsx`)
-- Services: `camelCase` with `Service` suffix (e.g., `medicineService.ts`)
-- Database functions: `camelCase` with verb prefix (e.g., `getMedicines`, `createBill`)
-- Types/Interfaces: `PascalCase` with `I` prefix for interfaces (e.g., `IMedicine`)
-- Constants: `UPPER_SNAKE_CASE`
-- Zustand stores: `camelCase` with `Store` suffix (e.g., `medicineStore.ts`)
+NEVER call invoke() directly from a component. NEVER write SQL in components or services.
 
-## File Structure Rules
-- Each page has its own folder: `pages/PageName/index.tsx` + `pages/PageName/components/`
-- Services live in `services/` — no database calls directly in components
-- All database queries go through `db/` layer only
-- All Tauri commands go through `services/` — never call `invoke` directly in components
-- Types are shared in `types/` — never define types inline in components
-
-## Code Style
-```typescript
-// Always use async/await, never .then()
-// Always handle errors with try/catch
-// Always show user-friendly error messages (no technical errors to users)
-// Always validate inputs before database operations
-// Always use TypeScript strict mode - no 'any' types
-// Always add JSDoc comments to all exported functions
-```
-
-## UI/UX Rules
-- **Big buttons** — minimum 44px height for all interactive elements (touch-friendly)
-- **Clear labels** — every button/field has a plain English label (no jargon)
-- **Confirmation dialogs** — always confirm before delete/cancel operations
-- **Loading states** — always show a spinner during async operations
-- **Success/error feedback** — always show toast notifications after actions
-- **Keyboard shortcuts** — F2=New Bill, F3=Search Medicine, F5=Refresh, Escape=Close modal
-- **Color coding** — Green=success/safe, Amber=warning, Red=error/danger, Blue=information
+## Code Rules
+- async/await always, never .then()
+- try/catch on every invoke() call — show user-friendly toast on error
+- No `any` types — use types from @/types/index.ts
+- Min 44px height on ALL buttons and inputs
+- Always show spinner during loading
+- Always show toast after save/delete
+- Always confirm before delete (ConfirmDialog component)
+- Audit log every create/update/delete (Rust side)
 
 ## Security Rules
-- **Never store passwords in plain text** — use bcrypt for user passwords
-- **Never store API keys in code** — use environment variables or OS keychain
-- **Always sanitize user inputs** — use parameterized queries (never string concatenation in SQL)
-- **Always validate on server side** (Rust/Tauri commands) — never trust frontend validation alone
-- **Audit log everything** — every create/update/delete must write to audit_log table
-- **Role-based access** — check user permissions before every sensitive operation
+- Passwords: bcrypt only in Rust, never plain text, never in frontend
+- SQL: parameterized queries ONLY — never string interpolation
+- API keys: OS keychain (tauri-plugin-keyring), never in .env or code
+- Permissions: check hasPermission() before every sensitive action
+- Sessions: JWT in OS keychain, 8hr expiry
 
-## Database Rules
-- Always use **parameterized queries** — never interpolate user input into SQL strings
-- Always wrap multi-step operations in **transactions**
-- Always use **RETURNING** clause to get inserted/updated record back
-- Run **migrations** on startup — never modify the database schema manually
-- Always use **soft deletes** (`deleted_at` timestamp) — never hard delete records
+## File Naming
+- Components: PascalCase.tsx
+- Services: camelCaseService.ts
+- Stores: camelCaseStore.ts
+- Types: IPascalCase (interface prefix I)
+- Rust commands: snake_case
 
-## AI Features Architecture
-- **Tier 1** (Smart Analytics): Pure SQL/TypeScript math — no external libraries
-- **Tier 2** (On-Device): ONNX Runtime models in `src/ai/models/` — lazy loaded
-- **Tier 3** (Cloud): Claude API via `src/services/claudeService.ts` — always check internet first
-
-## Module Descriptions
-
-### Billing/POS Module (`pages/Billing/`)
-Fast keyboard-driven Point of Sale. Press F2 to open. Search medicine by name or scan barcode.
-Auto-calculates GST. Supports cash, UPI, card, credit payment modes. Prints to thermal or A4 printer.
-
-### Medicine Module (`pages/Medicine/`)
-Complete medicine master with batch tracking. Each batch tracks: batch no, expiry, quantity, rack location.
-Generates barcodes per batch. Shows stock levels and expiry alerts.
-
-### Purchase Module (`pages/Purchase/`)
-Manage supplier invoices. Supports manual entry AND email auto-import from CSV/Excel.
-Auto-matches imported items to medicine master. Shows review screen before saving.
-
-### Customer Module (`pages/Customers/`)
-Patient profiles with full purchase history, linked doctor, outstanding balance, allergy records.
-One-click billing from patient profile.
-
-### Reports Module (`pages/Reports/`)
-GST reports, CA/ROC package, sales reports, stock reports, expiry reports.
-All exportable as PDF and Excel.
-
-### AI Module (`pages/AI/`)
-Morning briefing, demand forecast, expiry risk scores, customer segments.
-Natural language business assistant (requires internet).
+## Module Guide
+- Billing/POS: F2 shortcut, barcode scan auto-add, FEFO batch, GST calc, print receipt
+- Medicine: master CRUD + batch CRUD + barcode generate + rack location
+- Purchase: manual entry + email IMAP auto-import CSV/Excel from distributors
+- Customers: patient profiles, purchase history, allergies, loyalty points
+- Expiry: scan barcode to check, colour-coded risk, build return list
+- Reports: sales/purchase/stock/GST/P&L + CA annual package ZIP
+- AI Tier1: pure SQL math (demand forecast, expiry risk, customer segments)
+- AI Tier3: Claude API (natural language Q&A, WhatsApp message drafts)

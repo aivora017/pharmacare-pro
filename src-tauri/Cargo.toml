@@ -10,17 +10,12 @@ edition = "2021"
 # Do not publish to crates.io
 publish = false
 
-[lib]
-name = "pharmacare_pro_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
-
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
 # ── Tauri Core ────────────────────────────────────────────────
 tauri = { version = "2", features = [] }
-tauri-plugin-keyring       = "2"        # OS keychain for secrets
 tauri-plugin-shell         = "2"        # Shell access
 tauri-plugin-updater       = "2"        # Auto-updates
 tauri-plugin-dialog        = "2"        # File open/save dialogs
@@ -28,8 +23,8 @@ tauri-plugin-fs            = "2"        # File system
 tauri-plugin-notification  = "2"        # Desktop notifications
 
 # ── Database ──────────────────────────────────────────────────
-rusqlite = { version = "0.31", features = ["bundled", "backup", "sqlcipher"] }
-# sqlcipher = database encryption (AES-256)
+rusqlite = { version = "0.31", features = ["bundled", "backup"] }
+# NOTE: SQLCipher can be re-enabled when libsqlcipher is available in the target toolchain.
 
 # ── Async Runtime ─────────────────────────────────────────────
 tokio = { version = "1", features = ["full"] }

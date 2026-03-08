@@ -1,193 +1,157 @@
-import { FormEvent, useMemo, useState } from 'react'
-import { Plus, Trash2 } from 'lucide-react'
-import toast from 'react-hot-toast'
-import { billingService } from '@/services/billingService'
-import type { ICartItem } from '@/types'
-import { calculateBillTotals, calculateGST, formatINR } from '@/utils/gst'
-
 /**
- * Lightweight billing screen used for local validation and core GST flow tests.
+ * POS Billing — most used screen (50-200x per day).
+ * Keyboard: F2=new, F4=hold, F5=held bills, F7=payment, Escape=close
+ * Barcode scan: fast chars+Enter → auto-add item
+ * FEFO: batch with nearest expiry is selected automatically
+ * Drug interactions: warn in amber banner but NEVER block billing
+ *
+ * Copilot next steps for this file:
+ * 1. Implement medicine search dropdown (medicineService.search)
+ * 2. Implement barcode scan detection and auto-add
+ * 3. Build PaymentPanel component in ./components/PaymentPanel.tsx
+ * 4. Build CustomerSelector modal in ./components/CustomerSelector.tsx
+ * 5. Build HeldBillsPanel in ./components/HeldBillsPanel.tsx
+ * 6. Drug interaction check when adding each item
+ * 7. Call billingService.createBill() on payment confirm
  */
+import { useState, useEffect, useRef } from "react"
+import { ShoppingCart, Search, User, PauseCircle } from "lucide-react"
+import toast from "react-hot-toast"
+import { useCartStore } from "@/store/cartStore"
+import { useAuthStore } from "@/store/authStore"
+import { billingService } from "@/services/billingService"
+import { formatCurrency } from "@/utils/currency"
+
 export default function BillingPage() {
-  const [query, setQuery] = useState('')
-  const [items, setItems] = useState<ICartItem[]>([])
-  const [isSaving, setIsSaving] = useState(false)
+  const searchRef = useRef<HTMLInputElement>(null)
+  const [searchQuery, setSearchQuery] = useState("")
+  const [showPayment, setShowPayment] = useState(false)
+  const { user } = useAuthStore()
+  const { items, customer, totals, removeItem, updateQuantity, updateItemDiscount, setCustomer, clear } = useCartStore()
 
-  const totals = useMemo(() => calculateBillTotals(items), [items])
+  useEffect(() => { searchRef.current?.focus() }, [])
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.key === "F7" && items.length > 0) { e.preventDefault(); setShowPayment(true) } }
+    window.addEventListener("keydown", h); return () => window.removeEventListener("keydown", h)
+  }, [items.length])
 
-  const addLineItem = (event: FormEvent) => {
-    event.preventDefault()
-
-    const name = query.trim()
-    if (!name) {
-      toast.error('Enter a medicine name first.')
-      return
-    }
-
-    const basePrice = 50
-    const timestamp = Date.now()
-    const nextItem: ICartItem = {
-      medicine_id: timestamp,
-      batch_id: timestamp,
-      medicine_name: name,
-      batch_number: `B-${Math.floor(Math.random() * 1000)}`,
-      expiry_date: new Date(Date.now() + 180 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
-      quantity: 1,
-      unit_price: basePrice,
-      mrp: basePrice,
-      discount_percent: 0,
-      discount_amount: 0,
-      gst_rate: 12,
-      cgst_amount: 0,
-      sgst_amount: 0,
-      igst_amount: 0,
-      total_amount: basePrice,
-      is_near_expiry: false,
-    }
-
-    setItems((prev) => [...prev, calculateGST(nextItem)])
-    setQuery('')
-  }
-
-  const updateQuantity = (index: number, quantity: number) => {
-    const safeQuantity = Number.isNaN(quantity) ? 1 : Math.max(1, quantity)
-    setItems((prev) =>
-      prev.map((item, currentIndex) => {
-        if (currentIndex !== index) {
-          return item
-        }
-
-        const updated: ICartItem = {
-          ...item,
-          quantity: safeQuantity,
-        }
-
-        return calculateGST(updated)
-      })
-    )
-  }
-
-  const removeItem = (index: number) => {
-    setItems((prev) => prev.filter((_, currentIndex) => currentIndex !== index))
-  }
-
-  const holdDraft = async () => {
-    if (items.length === 0) {
-      toast.error('Add at least one medicine to hold a draft bill.')
-      return
-    }
-
-    setIsSaving(true)
+  const handleSave = async (payments: { amount: number; payment_mode: string; reference_no?: string }[]) => {
     try {
-      await billingService.holdBill({
-        items,
-        label: `Draft ${new Date().toLocaleTimeString()}`,
-      })
-      toast.success('Draft bill saved.')
-      setItems([])
-    } catch {
-      toast.error('Could not save draft bill.')
-    } finally {
-      setIsSaving(false)
-    }
+      const id = await billingService.createBill({ items, payments, discount_amount: totals.bill_discount, created_by: user!.id, customer_id: customer?.id })
+      clear(); setShowPayment(false)
+      toast.success(`Bill #${id} saved! Printing receipt...`)
+      // Copilot: call printerService.printBill(id, "thermal") here
+    } catch { toast.error("Could not save bill. Please try again.") }
   }
 
   return (
-    <section className="p-6 space-y-6">
-      <header className="space-y-1">
-        <h1 className="text-2xl font-bold text-slate-900">Billing</h1>
-        <p className="text-sm text-slate-600">Add medicines, adjust quantity, and hold a bill draft.</p>
-      </header>
-
-      <form onSubmit={addLineItem} className="flex gap-3">
-        <input
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder="Enter medicine name"
-          className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
-        />
-        <button
-          type="submit"
-          className="inline-flex h-11 items-center rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-700"
-        >
-          <Plus size={16} className="mr-2" />
-          Add Item
-        </button>
-      </form>
-
-      <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
-        <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-slate-600">
-            <tr>
-              <th className="px-3 py-2 text-left">Medicine</th>
-              <th className="px-3 py-2 text-center">Qty</th>
-              <th className="px-3 py-2 text-right">Unit</th>
-              <th className="px-3 py-2 text-right">GST</th>
-              <th className="px-3 py-2 text-right">Line Total</th>
-              <th className="px-3 py-2 text-center">Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.length === 0 && (
-              <tr>
-                <td className="px-3 py-6 text-center text-slate-500" colSpan={6}>
-                  No items added yet.
-                </td>
-              </tr>
+    <div className="flex h-full bg-slate-50 -m-4 overflow-hidden">
+      <div className="flex flex-col flex-1 min-w-0">
+        <div className="flex items-center justify-between px-4 py-3 bg-white border-b border-slate-200">
+          <div className="flex items-center gap-2">
+            <ShoppingCart size={20} className="text-blue-600" />
+            <h1 className="font-bold text-slate-800">New Bill</h1>
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={() => {/* Copilot: open CustomerSelector */}}
+              className="flex items-center gap-1.5 px-3 py-2 text-sm border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors min-h-touch">
+              <User size={14} />{customer ? customer.name : "Add Customer (F6)"}
+            </button>
+            {items.length > 0 && (
+              <button onClick={async () => { await billingService.holdBill({ items, customer }); clear(); toast.success("Bill held.") }}
+                className="flex items-center gap-1.5 px-3 py-2 text-sm border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors min-h-touch">
+                <PauseCircle size={14} />Hold<kbd className="ml-1 text-slate-400 text-xs font-mono">F4</kbd>
+              </button>
             )}
-            {items.map((item, index) => (
-              <tr key={`${item.batch_id}-${index}`} className="border-t border-slate-100">
-                <td className="px-3 py-2">{item.medicine_name}</td>
-                <td className="px-3 py-2 text-center">
-                  <input
-                    type="number"
-                    min={1}
-                    value={item.quantity}
-                    onChange={(event) => updateQuantity(index, Number(event.target.value))}
-                    className="w-20 rounded border border-slate-300 px-2 py-1 text-center"
-                  />
-                </td>
-                <td className="px-3 py-2 text-right">{formatINR(item.unit_price)}</td>
-                <td className="px-3 py-2 text-right">{formatINR(item.cgst_amount + item.sgst_amount + item.igst_amount)}</td>
-                <td className="px-3 py-2 text-right font-semibold">{formatINR(item.total_amount)}</td>
-                <td className="px-3 py-2 text-center">
-                  <button
-                    type="button"
-                    onClick={() => removeItem(index)}
-                    className="inline-flex items-center text-red-600 hover:text-red-700"
-                  >
-                    <Trash2 size={16} />
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+          </div>
+        </div>
+        <div className="px-4 py-3 bg-white border-b border-slate-200">
+          <div className="relative">
+            <Search size={17} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input ref={searchRef} value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
+              placeholder="Type medicine name or scan barcode to add..." autoComplete="off"
+              className="w-full pl-10 pr-4 py-3 text-sm border-2 border-blue-200 focus:border-blue-500 rounded-xl outline-none bg-blue-50 focus:bg-white transition-colors" />
+          </div>
+          {/* Copilot: render MedicineSearchDropdown here when searchQuery.length >= 2 */}
+          {/* File: src/pages/Billing/components/MedicineSearchDropdown.tsx */}
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          {items.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full text-slate-400 gap-3 py-16">
+              <ShoppingCart size={48} className="text-slate-200" />
+              <p className="text-base font-medium">Bill is empty</p>
+              <p className="text-sm">Search for a medicine above or scan a barcode</p>
+            </div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 border-b border-slate-200 sticky top-0">
+                <tr className="text-xs text-slate-500 uppercase tracking-wide">
+                  <th className="text-left px-4 py-2.5">Medicine</th>
+                  <th className="text-center px-2 py-2.5">Expiry</th>
+                  <th className="text-center px-2 py-2.5">Qty</th>
+                  <th className="text-right px-2 py-2.5">Rate</th>
+                  <th className="text-center px-2 py-2.5 w-20">Disc%</th>
+                  <th className="text-right px-2 py-2.5">GST</th>
+                  <th className="text-right px-4 py-2.5">Amount</th>
+                  <th className="w-8"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {items.map((item, i) => (
+                  <tr key={i} className={item.is_near_expiry ? "bg-amber-50" : "hover:bg-slate-50"}>
+                    <td className="px-4 py-3">
+                      <p className="font-medium text-slate-800">{item.medicine_name}</p>
+                      <p className="text-xs text-slate-400">Batch: {item.batch_number}</p>
+                      {item.is_near_expiry && <span className="text-xs text-amber-600 font-medium">⚠ Near expiry</span>}
+                    </td>
+                    <td className="px-2 py-3 text-center text-xs text-slate-500">{item.expiry_date}</td>
+                    <td className="px-2 py-3">
+                      <div className="flex items-center justify-center gap-1">
+                        <button onClick={() => updateQuantity(i, item.quantity - 1)} className="w-6 h-6 rounded border border-slate-300 flex items-center justify-center hover:bg-slate-100 text-slate-700">−</button>
+                        <input type="number" min={1} value={item.quantity} onChange={e => updateQuantity(i, parseInt(e.target.value)||1)}
+                          className="w-12 text-center border border-slate-300 rounded text-sm py-0.5 outline-none focus:ring-1 focus:ring-blue-500" />
+                        <button onClick={() => updateQuantity(i, item.quantity + 1)} className="w-6 h-6 rounded border border-slate-300 flex items-center justify-center hover:bg-slate-100 text-slate-700">+</button>
+                      </div>
+                    </td>
+                    <td className="px-2 py-3 text-right text-slate-700">₹{item.unit_price}</td>
+                    <td className="px-2 py-3">
+                      <input type="number" min={0} max={100} value={item.discount_percent} onChange={e => updateItemDiscount(i, parseFloat(e.target.value)||0)}
+                        className="w-16 text-center border border-slate-300 rounded text-sm py-0.5 outline-none focus:ring-1 focus:ring-blue-500" />
+                    </td>
+                    <td className="px-2 py-3 text-right text-xs text-slate-500">₹{(item.cgst_amount+item.sgst_amount+item.igst_amount).toFixed(2)}</td>
+                    <td className="px-4 py-3 text-right font-semibold text-slate-800">₹{item.total_amount.toFixed(2)}</td>
+                    <td className="px-2 py-3">
+                      <button onClick={() => removeItem(i)} className="text-slate-300 hover:text-red-500 text-lg leading-none">×</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+        {items.length > 0 && (
+          <div className="bg-white border-t border-slate-200 px-4 py-3">
+            <div className="flex items-end justify-between">
+              <div className="text-sm text-slate-600 space-y-0.5">
+                <p>Subtotal: ₹{totals.subtotal.toFixed(2)} &nbsp;|&nbsp; GST: ₹{totals.total_gst.toFixed(2)}</p>
+                {totals.item_discount > 0 && <p className="text-green-600">Discount: -₹{totals.item_discount.toFixed(2)}</p>}
+              </div>
+              <div className="flex items-center gap-4">
+                <div className="text-right">
+                  <p className="text-xs text-slate-400">Total Amount</p>
+                  <p className="text-3xl font-bold text-slate-900">{formatCurrency(totals.net_amount)}</p>
+                </div>
+                <button onClick={() => setShowPayment(true)}
+                  className="h-14 px-8 bg-green-600 hover:bg-green-700 text-white font-bold rounded-xl shadow flex items-center gap-2">
+                  Collect Payment <kbd className="text-green-200 text-xs font-mono">F7</kbd>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
-
-      <div className="rounded-lg border border-slate-200 bg-white p-4">
-        <div className="flex justify-between text-sm text-slate-700">
-          <span>Subtotal</span>
-          <strong>{formatINR(totals.subtotal)}</strong>
-        </div>
-        <div className="mt-1 flex justify-between text-sm text-slate-700">
-          <span>Total GST</span>
-          <strong>{formatINR(totals.total_gst)}</strong>
-        </div>
-        <div className="mt-2 flex justify-between text-base text-slate-900">
-          <span className="font-semibold">Net Amount</span>
-          <strong>{formatINR(totals.net_amount)}</strong>
-        </div>
-
-        <button
-          type="button"
-          onClick={holdDraft}
-          disabled={isSaving}
-          className="mt-4 inline-flex h-11 items-center rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {isSaving ? 'Saving...' : 'Hold Draft Bill'}
-        </button>
-      </div>
-    </section>
+      {/* Copilot: mount PaymentPanel when showPayment=true */}
+      {/* <PaymentPanel netAmount={totals.net_amount} onConfirm={handleSave} onClose={() => setShowPayment(false)} /> */}
+    </div>
   )
 }

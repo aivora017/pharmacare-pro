@@ -3,37 +3,18 @@
   "editor.defaultFormatter": "esbenp.prettier-vscode",
   "editor.tabSize": 2,
   "editor.rulers": [100],
-  "editor.wordWrap": "wordWrapColumn",
-  "editor.wordWrapColumn": 100,
-
   "[rust]": {
     "editor.defaultFormatter": "rust-lang.rust-analyzer",
     "editor.formatOnSave": true
   },
-
   "typescript.preferences.importModuleSpecifier": "non-relative",
   "typescript.suggest.autoImports": true,
-
-  "tailwindCSS.experimental.classRegex": [
-    ["clsx\\(([^)]*)\\)", "'([^']*)'"],
-    ["cn\\(([^)]*)\\)", "'([^']*)'"]
-  ],
-
-  "files.exclude": {
-    "**/node_modules": true,
-    "**/target": true,
-    "**/.git": false
-  },
-
-  "github.copilot.enable": {
-    "*": true,
-    "plaintext": false,
-    "markdown": true
-  },
-
+  "tailwindCSS.experimental.classRegex": [["clsx\\(([^)]*)\\)","'([^']*)'"]],
+  "files.exclude": { "**/node_modules": true, "**/target": true },
+  "github.copilot.enable": { "*": true, "plaintext": false },
   "explorer.fileNesting.enabled": true,
   "explorer.fileNesting.patterns": {
-    "*.tsx": "${capture}.test.tsx, ${capture}.stories.tsx",
-    "*.ts": "${capture}.test.ts"
+    "*.tsx": "${capture}.test.tsx",
+    "*.ts":  "${capture}.test.ts"
   }
 }
