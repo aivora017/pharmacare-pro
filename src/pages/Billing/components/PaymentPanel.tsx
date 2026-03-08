@@ -46,7 +46,10 @@ export function PaymentPanel({ netAmount, onConfirm, onClose, isSaving = false }
     () => r2(splitLines.reduce((sum, line) => sum + Number(line.amount || 0), 0)),
     [splitLines]
   )
-  const splitPending = useMemo(() => r2(Math.max(0, netAmount - splitTotal)), [netAmount, splitTotal])
+  const splitPending = useMemo(
+    () => r2(Math.max(0, netAmount - splitTotal)),
+    [netAmount, splitTotal]
+  )
   const splitExtra = useMemo(() => r2(Math.max(0, splitTotal - netAmount)), [netAmount, splitTotal])
   const hasInvalidSplitRef = useMemo(
     () =>
@@ -125,7 +128,9 @@ export function PaymentPanel({ netAmount, onConfirm, onClose, isSaving = false }
           {!isSplit ? (
             <>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Payment Mode</label>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Payment Mode
+                </label>
                 <select
                   value={paymentMode}
                   onChange={(e) => setPaymentMode(e.target.value as (typeof modes)[number])}
@@ -140,7 +145,9 @@ export function PaymentPanel({ netAmount, onConfirm, onClose, isSaving = false }
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Amount Received</label>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Amount Received
+                </label>
                 <input
                   type="number"
                   step="0.01"
@@ -229,8 +236,12 @@ export function PaymentPanel({ netAmount, onConfirm, onClose, isSaving = false }
               </button>
               <div className="text-xs text-slate-600">
                 <p>Total entered: ₹{splitTotal.toFixed(2)}</p>
-                {splitPending > 0 && <p className="text-red-600">Pending: ₹{splitPending.toFixed(2)}</p>}
-                {splitExtra > 0 && <p className="text-amber-700">Extra: ₹{splitExtra.toFixed(2)}</p>}
+                {splitPending > 0 && (
+                  <p className="text-red-600">Pending: ₹{splitPending.toFixed(2)}</p>
+                )}
+                {splitExtra > 0 && (
+                  <p className="text-amber-700">Extra: ₹{splitExtra.toFixed(2)}</p>
+                )}
               </div>
             </div>
           )}

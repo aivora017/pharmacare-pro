@@ -50,8 +50,8 @@ pub struct PaymentInput {
 pub async fn billing_create_bill(
     state: State<'_, AppState>, input: CreateBillInput
 ) -> Result<i64, AppError> {
-    // TODO (Copilot): implement per the 11 steps above — use TRANSACTION
-    todo!("billing_create_bill")
+    let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+    db.create_bill(&input)
 }
 
 #[tauri::command]
@@ -82,8 +82,8 @@ pub async fn billing_list_bills(
 pub async fn billing_hold_bill(
     state: State<'_, AppState>, input: serde_json::Value
 ) -> Result<(), AppError> {
-    // TODO: INSERT into held_bills with JSON-serialized cart_data
-    todo!("billing_hold_bill")
+    let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+    db.hold_bill(&input)
 }
 
 #[tauri::command]
