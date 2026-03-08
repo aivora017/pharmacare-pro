@@ -1,4 +1,5 @@
 use crate::commands::auth::UserDto;
+use crate::commands::billing::CreateBillInput;
 use crate::commands::medicine::{BatchDto, CategoryDto, MedicineDetailDto, MedicineDto};
 use crate::error::AppError;
 use bcrypt::{hash, DEFAULT_COST};
@@ -216,6 +217,249 @@ impl Database {
         .optional()
         .map_err(|e| AppError::Internal(e.to_string()))?
         .ok_or(AppError::Validation("User not found.".to_string()))
+    }
+
+    pub fn create_bill(&self, input: &CreateBillInput) -> Result<i64, AppError> {
+        if input.items.is_empty() {
+            return Err(AppError::Validation("Bill must contain at least one item.".to_string()));
+        }
+
+        if input.payments.is_empty() {
+            return Err(AppError::Validation("At least one payment entry is required.".to_string()));
+        }
+
+        let mut conn = self.connection()?;
+        let tx = conn
+            .transaction()
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        for item in &input.items {
+            let available: i64 = tx
+                .query_row(
+                    "SELECT quantity_in - quantity_sold - quantity_adjusted FROM batches WHERE id = ?1",
+                    params![item.batch_id],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(|e| AppError::Internal(e.to_string()))?
+                .ok_or_else(|| AppError::Validation(format!("Batch not found: {}", item.batch_id)))?;
+
+            if available < item.quantity {
+                return Err(AppError::Validation(format!(
+                    "Insufficient stock for {} (available {}, requested {}).",
+                    item.medicine_name, available, item.quantity
+                )));
+            }
+        }
+
+        let month_key = chrono::Utc::now().format("%Y%m").to_string();
+        let pattern = format!("POS-{}-%", month_key);
+        let next_seq: i64 = tx
+            .query_row(
+                "SELECT COALESCE(MAX(CAST(SUBSTR(bill_number, -5) AS INTEGER)), 0) + 1
+                 FROM bills
+                 WHERE bill_number LIKE ?1",
+                params![pattern],
+                |row| row.get(0),
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let bill_number = format!("POS-{}-{:05}", month_key, next_seq);
+
+        let subtotal = input
+            .items
+            .iter()
+            .map(|item| item.unit_price * item.quantity as f64)
+            .sum::<f64>();
+        let item_discount = input.items.iter().map(|item| item.discount_amount).sum::<f64>();
+        let discount_amount = input.discount_amount.unwrap_or(0.0);
+        let taxable_amount = subtotal - item_discount - discount_amount;
+        let cgst_amount = input.items.iter().map(|item| item.cgst_amount).sum::<f64>();
+        let sgst_amount = input.items.iter().map(|item| item.sgst_amount).sum::<f64>();
+        let igst_amount = input.items.iter().map(|item| item.igst_amount).sum::<f64>();
+        let total_amount = input.items.iter().map(|item| item.total_amount).sum::<f64>();
+        let round_off = (total_amount.round() * 100.0 - total_amount * 100.0).round() / 100.0;
+        let net_amount = total_amount + round_off;
+
+        let amount_paid = input.payments.iter().map(|payment| payment.amount).sum::<f64>();
+        let change_returned = if amount_paid > net_amount {
+            amount_paid - net_amount
+        } else {
+            0.0
+        };
+        let outstanding = if net_amount > amount_paid {
+            net_amount - amount_paid
+        } else {
+            0.0
+        };
+
+        let loyalty_points_earned = if input.customer_id.is_some() {
+            (net_amount / 100.0).floor() as i64
+        } else {
+            0
+        };
+
+        tx.execute(
+            "INSERT INTO bills (
+                bill_number, customer_id, doctor_id, bill_date, status, prescription_ref,
+                subtotal, discount_amount, taxable_amount,
+                cgst_amount, sgst_amount, igst_amount,
+                total_amount, round_off, net_amount,
+                amount_paid, change_returned, outstanding,
+                loyalty_points_earned, notes, created_by
+             ) VALUES (
+                ?1, ?2, ?3, datetime('now'), 'active', ?4,
+                ?5, ?6, ?7,
+                ?8, ?9, ?10,
+                ?11, ?12, ?13,
+                ?14, ?15, ?16,
+                ?17, ?18, ?19
+             )",
+            params![
+                bill_number,
+                input.customer_id,
+                input.doctor_id,
+                input.prescription_ref,
+                subtotal,
+                discount_amount,
+                taxable_amount,
+                cgst_amount,
+                sgst_amount,
+                igst_amount,
+                total_amount,
+                round_off,
+                net_amount,
+                amount_paid,
+                change_returned,
+                outstanding,
+                loyalty_points_earned,
+                input.notes,
+                input.created_by,
+            ],
+        )
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let bill_id = tx.last_insert_rowid();
+
+        for item in &input.items {
+            tx.execute(
+                "INSERT INTO bill_items (
+                    bill_id, medicine_id, batch_id, medicine_name, batch_number, expiry_date,
+                    quantity, unit_price, mrp,
+                    discount_percent, discount_amount, gst_rate,
+                    cgst_amount, sgst_amount, igst_amount, total_amount
+                 ) VALUES (
+                    ?1, ?2, ?3, ?4, ?5, ?6,
+                    ?7, ?8, ?9,
+                    ?10, ?11, ?12,
+                    ?13, ?14, ?15, ?16
+                 )",
+                params![
+                    bill_id,
+                    item.medicine_id,
+                    item.batch_id,
+                    item.medicine_name,
+                    item.batch_number,
+                    item.expiry_date,
+                    item.quantity,
+                    item.unit_price,
+                    item.mrp,
+                    item.discount_percent,
+                    item.discount_amount,
+                    item.gst_rate,
+                    item.cgst_amount,
+                    item.sgst_amount,
+                    item.igst_amount,
+                    item.total_amount,
+                ],
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+            tx.execute(
+                "UPDATE batches
+                 SET quantity_sold = quantity_sold + ?1, updated_at = datetime('now')
+                 WHERE id = ?2",
+                params![item.quantity, item.batch_id],
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+        }
+
+        for payment in &input.payments {
+            tx.execute(
+                "INSERT INTO payments (bill_id, amount, payment_mode, reference_no, created_by)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![
+                    bill_id,
+                    payment.amount,
+                    payment.payment_mode,
+                    payment.reference_no,
+                    input.created_by,
+                ],
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+        }
+
+        if let Some(customer_id) = input.customer_id {
+            tx.execute(
+                "UPDATE customers
+                 SET outstanding_balance = outstanding_balance + ?1,
+                     loyalty_points = loyalty_points + ?2,
+                     updated_at = datetime('now')
+                 WHERE id = ?3",
+                params![outstanding, loyalty_points_earned, customer_id],
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+        }
+
+        let payload = serde_json::json!({
+            "bill_id": bill_id,
+            "bill_number": bill_number,
+            "customer_id": input.customer_id,
+            "item_count": input.items.len(),
+            "net_amount": net_amount,
+            "outstanding": outstanding,
+        })
+        .to_string();
+
+        tx.execute(
+            "INSERT INTO audit_log (user_id, user_name, action, module, record_id, old_value, new_value, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                input.created_by,
+                format!("user:{}", input.created_by),
+                "BILL_CREATED",
+                "billing",
+                bill_id.to_string(),
+                Option::<String>::None,
+                payload,
+                chrono::Utc::now().to_rfc3339(),
+            ],
+        )
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        tx.commit().map_err(|e| AppError::Internal(e.to_string()))?;
+        Ok(bill_id)
+    }
+
+    pub fn hold_bill(&self, input: &serde_json::Value) -> Result<(), AppError> {
+        let conn = self.connection()?;
+        let label = input
+            .get("label")
+            .and_then(|value| value.as_str())
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty())
+            .unwrap_or("Held Bill");
+
+        let created_by = input.get("created_by").and_then(|value| value.as_i64());
+        let cart_data = serde_json::to_string(input).map_err(|e| AppError::Internal(e.to_string()))?;
+
+        conn.execute(
+            "INSERT INTO held_bills (label, cart_data, created_by) VALUES (?1, ?2, ?3)",
+            params![label, cart_data, created_by],
+        )
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        Ok(())
     }
 
     pub fn update_password(&self, user_id: i64, new_hash: &str) -> Result<(), AppError> {
