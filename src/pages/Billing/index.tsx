@@ -29,6 +29,7 @@ import type { ICartItem } from '@/types'
 import { formatCurrency } from '@/utils/currency'
 import { MedicineSearchDropdown } from './components/MedicineSearchDropdown'
 import { PaymentPanel } from './components/PaymentPanel'
+import { CustomerSelector } from './components/CustomerSelector'
 
 function makeCartItem(medicine: IMedicineListItem, batch: IBatchItem): ICartItem {
   const nearExpiryDays = 30
@@ -61,6 +62,7 @@ export default function BillingPage() {
   const searchRef = useRef<HTMLInputElement>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [showPayment, setShowPayment] = useState(false)
+  const [showCustomerSelector, setShowCustomerSelector] = useState(false)
   const [searchResults, setSearchResults] = useState<IMedicineListItem[]>([])
   const [isSearching, setIsSearching] = useState(false)
   const [isAddingItem, setIsAddingItem] = useState(false)
@@ -84,6 +86,29 @@ export default function BillingPage() {
     setCustomer,
     clear,
   } = useCartStore()
+
+  const maybeShowInteractionWarning = useCallback(
+    (incomingMedicineName: string) => {
+      const normalizedIncoming = incomingMedicineName.toLowerCase()
+      const existing = items.map((item) => item.medicine_name.toLowerCase())
+
+      const dangerPairs: Array<[string, string, string]> = [
+        ['diclo', 'ibuprofen', 'Avoid combining two NSAIDs unless explicitly prescribed.'],
+        ['aceclo', 'ibuprofen', 'Avoid combining two NSAIDs unless explicitly prescribed.'],
+        ['paracetamol', 'dolo', 'Possible duplicate paracetamol exposure. Verify dose.'],
+      ]
+
+      for (const [a, b, message] of dangerPairs) {
+        const hasA = normalizedIncoming.includes(a) || existing.some((name) => name.includes(a))
+        const hasB = normalizedIncoming.includes(b) || existing.some((name) => name.includes(b))
+        if (hasA && hasB) {
+          toast(message, { icon: '⚠️' })
+          break
+        }
+      }
+    },
+    [items]
+  )
 
   const loadHeldBills = useCallback(async () => {
     try {
@@ -133,6 +158,7 @@ export default function BillingPage() {
         }
 
         addItem(makeCartItem(medicine, sellable[0]))
+        maybeShowInteractionWarning(medicine.name)
         setSearchQuery('')
         setSearchResults([])
         toast.success('Medicine added to bill.')
@@ -143,7 +169,7 @@ export default function BillingPage() {
         setIsAddingItem(false)
       }
     },
-    [addItem]
+    [addItem, maybeShowInteractionWarning]
   )
 
   const addBarcodeToCart = useCallback(
@@ -174,6 +200,7 @@ export default function BillingPage() {
             batch
           )
         )
+        maybeShowInteractionWarning(medicine.name)
         setSearchQuery('')
         setSearchResults([])
         toast.success('Barcode item added to bill.')
@@ -183,7 +210,7 @@ export default function BillingPage() {
         setIsAddingItem(false)
       }
     },
-    [addItem]
+    [addItem, maybeShowInteractionWarning]
   )
 
   const handlePaymentConfirm = async (
@@ -323,7 +350,7 @@ export default function BillingPage() {
           <div className="flex items-center gap-2">
             <button
               onClick={() => {
-                /* Copilot: open CustomerSelector */
+                setShowCustomerSelector(true)
               }}
               className="flex items-center gap-1.5 px-3 py-2 text-sm border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors min-h-touch"
             >
@@ -540,6 +567,17 @@ export default function BillingPage() {
           onClose={() => setShowPayment(false)}
           onConfirm={(payments) => {
             void handlePaymentConfirm(payments)
+          }}
+        />
+      )}
+      {showCustomerSelector && (
+        <CustomerSelector
+          userId={user?.id}
+          onClose={() => setShowCustomerSelector(false)}
+          onSelect={(c) => {
+            setCustomer(c)
+            setShowCustomerSelector(false)
+            toast.success('Customer linked to bill.')
           }}
         />
       )}

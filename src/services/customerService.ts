@@ -4,12 +4,26 @@
 import { invoke } from "@tauri-apps/api/core"
 import type { ICustomer, IDoctor } from "@/types"
 
+export interface ICustomerSearchItem {
+  id: number
+  name: string
+  phone?: string
+  outstanding_balance: number
+  loyalty_points: number
+}
+
+export interface ICustomerCreateInput {
+  name: string
+  phone?: string
+  email?: string
+}
+
 export const customerService = {
-  search:       async (query: string): Promise<ICustomer[]> =>
-    invoke<ICustomer[]>("customer_search", { query }),
+  search:       async (query: string): Promise<ICustomerSearchItem[]> =>
+    invoke<ICustomerSearchItem[]>("customer_search", { query }),
   get:          async (id: number): Promise<ICustomer> =>
     invoke<ICustomer>("customer_get", { id }),
-  create:       async (data: Partial<ICustomer>, userId: number): Promise<number> =>
+  create:       async (data: ICustomerCreateInput, userId: number): Promise<number> =>
     invoke<number>("customer_create", { data, userId }),
   update:       async (id: number, data: Partial<ICustomer>, userId: number): Promise<void> =>
     invoke("customer_update", { id, data, userId }),

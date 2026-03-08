@@ -2,17 +2,28 @@
 //! Customer and Doctor management
 
 use crate::{AppState, error::AppError};
+use serde::Deserialize;
 use tauri::State;
+
+#[derive(Debug, Deserialize)]
+pub struct CustomerCreateInput {
+    pub name: String,
+    pub phone: Option<String>,
+    pub email: Option<String>,
+}
 
 #[tauri::command]
 pub async fn customer_search(state: State<'_, AppState>, query: String) -> Result<serde_json::Value, AppError> {
-    // TODO: LIKE search on name + phone; include outstanding_balance, loyalty_points
-    todo!("customer_search")
+    let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+    db.customer_search(&query)
 }
 #[tauri::command]
 pub async fn customer_get(state: State<'_, AppState>, id: i64) -> Result<serde_json::Value, AppError> { todo!("customer_get") }
 #[tauri::command]
-pub async fn customer_create(state: State<'_, AppState>, data: serde_json::Value, user_id: i64) -> Result<i64, AppError> { todo!("customer_create") }
+pub async fn customer_create(state: State<'_, AppState>, data: CustomerCreateInput, user_id: i64) -> Result<i64, AppError> {
+    let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+    db.customer_create(&data.name, data.phone.as_deref(), data.email.as_deref(), user_id)
+}
 #[tauri::command]
 pub async fn customer_update(state: State<'_, AppState>, id: i64, data: serde_json::Value, user_id: i64) -> Result<(), AppError> { todo!("customer_update") }
 #[tauri::command]

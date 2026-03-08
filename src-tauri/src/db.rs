@@ -844,6 +844,89 @@ impl Database {
         }))
     }
 
+    pub fn customer_search(&self, query: &str) -> Result<serde_json::Value, AppError> {
+        let conn = self.connection()?;
+        let q = query.trim();
+        let like = format!("%{}%", q);
+
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, name, phone, outstanding_balance, loyalty_points
+                 FROM customers
+                 WHERE is_active = 1
+                   AND (
+                     ?1 = ''
+                     OR name LIKE ?2 COLLATE NOCASE
+                     OR COALESCE(phone, '') LIKE ?2
+                   )
+                 ORDER BY name ASC
+                 LIMIT 50",
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let rows = stmt
+            .query_map(params![q, like], |row| {
+                Ok(serde_json::json!({
+                    "id": row.get::<_, i64>(0)?,
+                    "name": row.get::<_, String>(1)?,
+                    "phone": row.get::<_, Option<String>>(2)?,
+                    "outstanding_balance": row.get::<_, f64>(3)?,
+                    "loyalty_points": row.get::<_, i64>(4)?,
+                }))
+            })
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let mut items = Vec::new();
+        for row in rows {
+            items.push(row.map_err(|e| AppError::Internal(e.to_string()))?);
+        }
+
+        Ok(serde_json::Value::Array(items))
+    }
+
+    pub fn customer_create(
+        &self,
+        name: &str,
+        phone: Option<&str>,
+        email: Option<&str>,
+        user_id: i64,
+    ) -> Result<i64, AppError> {
+        let clean_name = name.trim();
+        if clean_name.is_empty() {
+            return Err(AppError::Validation("Customer name is required.".to_string()));
+        }
+
+        let clean_phone = phone.map(|value| value.trim()).filter(|value| !value.is_empty());
+        let clean_email = email.map(|value| value.trim()).filter(|value| !value.is_empty());
+
+        let conn = self.connection()?;
+        conn.execute(
+            "INSERT INTO customers (name, phone, email, allergies, chronic_conditions, created_by)
+             VALUES (?1, ?2, ?3, '[]', '[]', ?4)",
+            params![clean_name, clean_phone, clean_email, user_id],
+        )
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let customer_id = conn.last_insert_rowid();
+        self.write_audit_log(
+            "CUSTOMER_CREATED",
+            "customer",
+            &customer_id.to_string(),
+            None,
+            Some(
+                &serde_json::json!({
+                    "name": clean_name,
+                    "phone": clean_phone,
+                    "email": clean_email,
+                })
+                .to_string(),
+            ),
+            &format!("user:{}", user_id),
+        )?;
+
+        Ok(customer_id)
+    }
+
     pub fn update_password(&self, user_id: i64, new_hash: &str) -> Result<(), AppError> {
         let conn = self.connection()?;
         let changed = conn

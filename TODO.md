@@ -67,8 +67,8 @@
 - [ ] Print thermal bill (80mm ESC/POS)
 - [ ] Print A4 bill (OS print dialog)
 - [x] Hold bill (F4) and recall held bills (F5)
-- [ ] Link customer to bill (customer search popup)
-- [ ] Drug interaction check (basic version — rule-based)
+- [x] Link customer to bill (customer search popup)
+- [x] Drug interaction check (basic version — rule-based)
 - [x] Near-expiry warning on bill items (< 30 days)
 
 ## PHASE 4 — Purchase & Suppliers (Weeks 7–9)
