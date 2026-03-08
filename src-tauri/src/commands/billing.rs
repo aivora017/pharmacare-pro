@@ -1,3 +1,4 @@
+#![allow(unused_variables, dead_code)]
 //! Billing / POS Commands
 //! billing_create_bill is the MOST CRITICAL command — runs as SQLite TRANSACTION
 //!
@@ -117,3 +118,4 @@ pub async fn billing_get_today_summary(
     // TODO: SUM/COUNT from bills + payments WHERE date(bill_date)=date('now') AND status='active'
     todo!("billing_get_today_summary")
 }
+

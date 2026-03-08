@@ -1,3 +1,4 @@
+#![allow(unused_variables, dead_code)]
 //! Customer and Doctor management
 
 use crate::{AppState, error::AppError};
@@ -25,3 +26,4 @@ pub async fn doctor_list(state: State<'_, AppState>) -> Result<serde_json::Value
 pub async fn doctor_create(state: State<'_, AppState>, data: serde_json::Value, user_id: i64) -> Result<i64, AppError> { todo!("doctor_create") }
 #[tauri::command]
 pub async fn doctor_update(state: State<'_, AppState>, id: i64, data: serde_json::Value, user_id: i64) -> Result<(), AppError> { todo!("doctor_update") }
+

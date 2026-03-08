@@ -1,3 +1,4 @@
+#![allow(unused_variables, dead_code)]
 //! License Key Validation via LemonSqueezy
 //! Machine-locked license: key is valid only on the machine it was activated on.
 
@@ -21,3 +22,4 @@ pub async fn license_get_status(state: State<'_, AppState>) -> Result<serde_json
     // TODO: return {status: "trial"|"active"|"expired", tier, trial_days_left}
     todo!("license_get_status")
 }
+

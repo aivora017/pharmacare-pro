@@ -1,3 +1,4 @@
+#![allow(unused_variables, dead_code)]
 //! Purchase Bills, Suppliers, Email Import
 //! purchase_create_bill steps:
 //! 1. Validate supplier exists and is active
@@ -30,3 +31,4 @@ pub async fn purchase_create_supplier(state: State<'_, AppState>, data: serde_js
 pub async fn purchase_list_suppliers(state: State<'_, AppState>) -> Result<serde_json::Value, AppError> { todo!("purchase_list_suppliers") }
 #[tauri::command]
 pub async fn purchase_update_supplier(state: State<'_, AppState>, id: i64, data: serde_json::Value, user_id: i64) -> Result<(), AppError> { todo!("purchase_update_supplier") }
+

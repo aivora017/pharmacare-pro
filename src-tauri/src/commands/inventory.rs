@@ -1,3 +1,4 @@
+#![allow(unused_variables, dead_code)]
 //! Inventory queries and stock adjustments
 
 use crate::{AppState, error::AppError};
@@ -26,3 +27,4 @@ pub async fn inventory_adjust_stock(
     // TODO: UPDATE batches.quantity_adjusted; INSERT stock_adjustments; audit
     todo!("inventory_adjust_stock")
 }
+

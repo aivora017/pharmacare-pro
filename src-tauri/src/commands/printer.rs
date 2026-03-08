@@ -1,3 +1,4 @@
+#![allow(unused_variables, dead_code)]
 //! Printing - Thermal (ESC/POS), Normal A4/A5, Barcode label (ZPL)
 
 use crate::{AppState, error::AppError};
@@ -24,3 +25,4 @@ pub async fn printer_test_print(state: State<'_, AppState>, printer_name: String
     // TODO: send a test page to the specified printer
     todo!("printer_test_print")
 }
+

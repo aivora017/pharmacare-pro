@@ -1,3 +1,4 @@
+#![allow(unused_variables, dead_code)]
 //! Barcode generation and label printing
 //! Barcodes use Code128 format: "MED{medicine_id:05}-{batch_number}"
 //! For POS scanning: decode to find batch immediately
@@ -20,3 +21,4 @@ pub async fn barcode_print_labels(state: State<'_, AppState>, labels: serde_json
     // TODO: generate ZPL string for Zebra or send to system printer for Dymo/TSC
     todo!("barcode_print_labels")
 }
+

@@ -1,3 +1,4 @@
+#![allow(unused_variables, dead_code)]
 //! AI Commands - Tier 1 (SQL analytics) + Tier 3 (Claude API)
 //!
 //! Tier 1 — all offline, no extra dependencies:
@@ -64,3 +65,4 @@ pub async fn ai_compose_message(
     // situation: "refill_reminder"|"credit_due"|"birthday"|"bulk_promotion"
     todo!("ai_compose_message")
 }
+

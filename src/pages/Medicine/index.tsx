@@ -11,6 +11,34 @@ import { useAuthStore } from '@/store/authStore'
 
 const SCHEDULES = ['OTC', 'H', 'H1', 'X', 'Narcotic'] as const
 const RACK_LOCATION_REGEX = /^[A-Za-z]-\d+-\d+$/
+const DAY_MS = 24 * 60 * 60 * 1000
+
+function getExpiryMeta(expiryDate: string): { label: string; className: string } {
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+
+  const expiry = new Date(expiryDate)
+  expiry.setHours(0, 0, 0, 0)
+
+  if (Number.isNaN(expiry.getTime())) {
+    return {
+      label: 'Unknown',
+      className: 'bg-slate-100 text-slate-700',
+    }
+  }
+
+  const daysLeft = Math.floor((expiry.getTime() - today.getTime()) / DAY_MS)
+  if (daysLeft < 0) {
+    return { label: 'Expired', className: 'bg-red-100 text-red-700' }
+  }
+  if (daysLeft <= 30) {
+    return { label: `${daysLeft}d left`, className: 'bg-orange-100 text-orange-700' }
+  }
+  if (daysLeft <= 90) {
+    return { label: `${daysLeft}d left`, className: 'bg-amber-100 text-amber-700' }
+  }
+  return { label: `${daysLeft}d left`, className: 'bg-emerald-100 text-emerald-700' }
+}
 
 export default function MedicinePage() {
   const user = useAuthStore((state) => state.user)
@@ -287,6 +315,7 @@ export default function MedicinePage() {
                   <th className="px-3 py-2 text-left">Generic</th>
                   <th className="px-3 py-2 text-left">Category</th>
                   <th className="px-3 py-2 text-left">Schedule</th>
+                  <th className="px-3 py-2 text-left">Status</th>
                   <th className="px-3 py-2 text-right">Stock</th>
                   <th className="px-3 py-2 text-right">GST %</th>
                 </tr>
@@ -294,13 +323,13 @@ export default function MedicinePage() {
               <tbody>
                 {loading ? (
                   <tr>
-                    <td className="px-3 py-4 text-slate-500" colSpan={6}>
+                    <td className="px-3 py-4 text-slate-500" colSpan={7}>
                       Loading medicines...
                     </td>
                   </tr>
                 ) : items.length === 0 ? (
                   <tr>
-                    <td className="px-3 py-4 text-slate-500" colSpan={6}>
+                    <td className="px-3 py-4 text-slate-500" colSpan={7}>
                       No medicines found.
                     </td>
                   </tr>
@@ -317,6 +346,21 @@ export default function MedicinePage() {
                         <td className="px-3 py-2 text-slate-700">{item.generic_name}</td>
                         <td className="px-3 py-2 text-slate-700">{item.category_name ?? '-'}</td>
                         <td className="px-3 py-2 text-slate-700">{item.schedule}</td>
+                        <td className="px-3 py-2">
+                          {item.total_stock === 0 ? (
+                            <span className="inline-flex rounded-full bg-rose-100 px-2 py-1 text-[11px] font-semibold text-rose-700">
+                              Out of stock
+                            </span>
+                          ) : lowStock ? (
+                            <span className="inline-flex rounded-full bg-orange-100 px-2 py-1 text-[11px] font-semibold text-orange-700">
+                              Low stock
+                            </span>
+                          ) : (
+                            <span className="inline-flex rounded-full bg-emerald-100 px-2 py-1 text-[11px] font-semibold text-emerald-700">
+                              Healthy
+                            </span>
+                          )}
+                        </td>
                         <td className="px-3 py-2 text-right">
                           <span
                             className={lowStock ? 'text-red-600 font-semibold' : 'text-slate-800'}
@@ -583,6 +627,7 @@ export default function MedicinePage() {
                     <tr>
                       <th className="px-2 py-1 text-left">Batch</th>
                       <th className="px-2 py-1 text-left">Expiry</th>
+                      <th className="px-2 py-1 text-left">Risk</th>
                       <th className="px-2 py-1 text-right">Stock</th>
                       <th className="px-2 py-1 text-left">Rack</th>
                     </tr>
@@ -590,19 +635,29 @@ export default function MedicinePage() {
                   <tbody>
                     {batches.length === 0 ? (
                       <tr>
-                        <td className="px-2 py-2 text-slate-500" colSpan={4}>
+                        <td className="px-2 py-2 text-slate-500" colSpan={5}>
                           No active batches.
                         </td>
                       </tr>
                     ) : (
-                      batches.map((batch) => (
-                        <tr key={batch.id} className="border-t border-slate-100">
-                          <td className="px-2 py-1">{batch.batch_number}</td>
-                          <td className="px-2 py-1">{batch.expiry_date}</td>
-                          <td className="px-2 py-1 text-right">{batch.quantity_on_hand}</td>
-                          <td className="px-2 py-1">{batch.rack_location ?? '-'}</td>
-                        </tr>
-                      ))
+                      batches.map((batch) => {
+                        const expiryMeta = getExpiryMeta(batch.expiry_date)
+                        return (
+                          <tr key={batch.id} className="border-t border-slate-100">
+                            <td className="px-2 py-1">{batch.batch_number}</td>
+                            <td className="px-2 py-1">{batch.expiry_date}</td>
+                            <td className="px-2 py-1">
+                              <span
+                                className={`inline-flex rounded-full px-2 py-1 text-[11px] font-semibold ${expiryMeta.className}`}
+                              >
+                                {expiryMeta.label}
+                              </span>
+                            </td>
+                            <td className="px-2 py-1 text-right">{batch.quantity_on_hand}</td>
+                            <td className="px-2 py-1">{batch.rack_location ?? '-'}</td>
+                          </tr>
+                        )
+                      })
                     )}
                   </tbody>
                 </table>

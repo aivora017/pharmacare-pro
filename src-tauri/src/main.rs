@@ -44,6 +44,7 @@ fn main() {
             commands::auth::auth_update_user,
             // ── Medicine
             commands::medicine::medicine_search,
+            commands::medicine::medicine_list_categories,
             commands::medicine::medicine_get,
             commands::medicine::medicine_create,
             commands::medicine::medicine_update,
@@ -130,5 +131,6 @@ fn main() {
         .run(tauri::generate_context!())
         .expect("PharmaCare Pro failed to start");
 }
+
 
 

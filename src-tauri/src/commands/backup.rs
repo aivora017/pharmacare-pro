@@ -1,3 +1,4 @@
+#![allow(unused_variables, dead_code)]
 //! Backup and Restore
 
 use crate::{AppState, error::AppError};
@@ -19,3 +20,4 @@ pub async fn backup_list(state: State<'_, AppState>) -> Result<Vec<serde_json::V
     // TODO: list all .db files in the default backup folder with sizes + dates
     todo!("backup_list")
 }
+

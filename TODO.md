@@ -47,8 +47,8 @@
 - [x] Add batch to medicine (all fields from IBatch type)
 - [x] Barcode auto-generation when batch is saved
 - [x] Rack location field with format validation (A-1-1 format)
-- [ ] Low stock indicator (red badge when quantity < reorder_level)
-- [ ] Expiry indicator (colour-coded badge by days until expiry)
+- [x] Low stock indicator (red badge when quantity < reorder_level)
+- [x] Expiry indicator (colour-coded badge by days until expiry)
 - [ ] Medicine detail page: show all batches, stock levels, alternates
 
 ## PHASE 3 — Billing / POS (Weeks 4–6)

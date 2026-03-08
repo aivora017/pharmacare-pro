@@ -1,3 +1,4 @@
+#![allow(unused_variables, dead_code)]
 //! Reports and CA Package Generation
 //! generateCAPackage creates a ZIP with all annual reports for the chartered accountant.
 //! This is an exclusive feature - no Indian pharmacy software bundles CA reports.
@@ -41,3 +42,4 @@ pub async fn reports_audit_log(state: State<'_, AppState>, filter: serde_json::V
     // TODO: SELECT audit_log with date/user/module filters; paginate
     todo!("reports_audit_log")
 }
+

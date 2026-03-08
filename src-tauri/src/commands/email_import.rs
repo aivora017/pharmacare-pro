@@ -1,3 +1,4 @@
+#![allow(unused_variables, dead_code)]
 //! IMAP Email Import for Distributor Bills
 //! This is an exclusive feature - no Indian pharmacy software has this.
 //!
@@ -33,3 +34,4 @@ pub async fn email_list_imports(state: State<'_, AppState>) -> Result<serde_json
     // TODO: SELECT email_imports ORDER BY received_at DESC
     todo!("email_list_imports")
 }
+
