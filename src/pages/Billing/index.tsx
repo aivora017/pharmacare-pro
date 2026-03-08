@@ -215,9 +215,13 @@ export default function BillingPage() {
     [addItem, maybeShowInteractionWarning]
   )
 
-  const handlePaymentConfirm = async (
+  const handlePaymentConfirm = async (payload: {
     payments: { amount: number; payment_mode: string; reference_no?: string }[]
-  ) => {
+    print: {
+      enabled: boolean
+      printer_type: 'thermal' | 'normal'
+    }
+  }) => {
     if (!user) {
       toast.error('Session expired. Please login again.')
       return
@@ -228,7 +232,7 @@ export default function BillingPage() {
       const billId = await billingService.createBill({
         customer_id: customer?.id,
         items,
-        payments,
+        payments: payload.payments,
         discount_amount: totals.bill_discount,
         created_by: user.id,
       })
@@ -236,11 +240,9 @@ export default function BillingPage() {
       setShowPayment(false)
       toast.success(`Bill #${billId} saved successfully.`)
 
-      // Keep print flow simple and explicit for billing staff.
-      const shouldPrint = window.confirm('Print bill now?')
-      if (shouldPrint) {
+      if (payload.print.enabled) {
         try {
-          await printerService.printBill(billId, 'thermal')
+          await printerService.printBill(billId, payload.print.printer_type)
           toast.success('Print job queued.')
         } catch {
           toast.error('Print failed. Please retry from bill history.')
@@ -352,7 +354,8 @@ export default function BillingPage() {
         scannerLastTsRef.current = 0
 
         const charCount = barcode.length
-        const totalMs = firstTs > 0 && lastTs >= firstTs ? lastTs - firstTs : Number.MAX_SAFE_INTEGER
+        const totalMs =
+          firstTs > 0 && lastTs >= firstTs ? lastTs - firstTs : Number.MAX_SAFE_INTEGER
         const avgMsPerChar = charCount > 1 ? totalMs / (charCount - 1) : Number.MAX_SAFE_INTEGER
         const looksLikeScannerInput = charCount >= 6 && avgMsPerChar <= 35
 
@@ -565,7 +568,9 @@ export default function BillingPage() {
                   <p className="text-green-600">Discount: -₹{totals.item_discount.toFixed(2)}</p>
                 )}
                 {totals.bill_discount > 0 && (
-                  <p className="text-green-600">Bill discount: -₹{totals.bill_discount.toFixed(2)}</p>
+                  <p className="text-green-600">
+                    Bill discount: -₹{totals.bill_discount.toFixed(2)}
+                  </p>
                 )}
               </div>
               <div className="flex items-center gap-4">
@@ -591,8 +596,8 @@ export default function BillingPage() {
           netAmount={totals.net_amount}
           isSaving={isSavingBill}
           onClose={() => setShowPayment(false)}
-          onConfirm={(payments) => {
-            void handlePaymentConfirm(payments)
+          onConfirm={(payload) => {
+            void handlePaymentConfirm(payload)
           }}
         />
       )}

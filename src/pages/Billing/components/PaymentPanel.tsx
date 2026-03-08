@@ -12,7 +12,13 @@ import { useMemo, useState } from 'react'
 
 interface Props {
   netAmount: number
-  onConfirm: (payments: { amount: number; payment_mode: string; reference_no?: string }[]) => void
+  onConfirm: (payload: {
+    payments: { amount: number; payment_mode: string; reference_no?: string }[]
+    print: {
+      enabled: boolean
+      printer_type: 'thermal' | 'normal'
+    }
+  }) => void
   onClose: () => void
   isSaving?: boolean
 }
@@ -36,6 +42,8 @@ export function PaymentPanel({ netAmount, onConfirm, onClose, isSaving = false }
   const [splitLines, setSplitLines] = useState<SplitLine[]>([
     { id: 1, mode: 'cash', amount: netAmount.toFixed(2), referenceNo: '' },
   ])
+  const [printEnabled, setPrintEnabled] = useState(true)
+  const [printerType, setPrinterType] = useState<'thermal' | 'normal'>('thermal')
 
   const amountNumber = useMemo(() => Number(amount || 0), [amount])
   const change = useMemo(() => Math.max(0, amountNumber - netAmount), [amountNumber, netAmount])
@@ -127,6 +135,32 @@ export function PaymentPanel({ netAmount, onConfirm, onClose, isSaving = false }
 
           {!isSplit ? (
             <>
+              <div className="rounded-lg border border-slate-200 p-3 space-y-2">
+                <label className="flex items-center gap-2 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={printEnabled}
+                    onChange={(e) => setPrintEnabled(e.target.checked)}
+                    className="w-4 h-4"
+                  />
+                  Print bill after save
+                </label>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">
+                    Print Format
+                  </label>
+                  <select
+                    value={printerType}
+                    onChange={(e) => setPrinterType(e.target.value as 'thermal' | 'normal')}
+                    disabled={!printEnabled}
+                    className="w-full min-h-touch rounded-lg border border-slate-300 px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100"
+                  >
+                    <option value="thermal">Thermal (80mm)</option>
+                    <option value="normal">Normal (A4)</option>
+                  </select>
+                </div>
+              </div>
+
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">
                   Payment Mode
@@ -252,25 +286,35 @@ export function PaymentPanel({ netAmount, onConfirm, onClose, isSaving = false }
           disabled={isSaving || (!isSplit ? !canSubmitSingle : !canSubmitSplit)}
           onClick={() => {
             if (!isSplit) {
-              onConfirm([
-                {
-                  amount: netAmount,
-                  payment_mode: paymentMode,
-                  reference_no: referenceNo.trim() || undefined,
+              onConfirm({
+                payments: [
+                  {
+                    amount: netAmount,
+                    payment_mode: paymentMode,
+                    reference_no: referenceNo.trim() || undefined,
+                  },
+                ],
+                print: {
+                  enabled: printEnabled,
+                  printer_type: printerType,
                 },
-              ])
+              })
               return
             }
 
-            onConfirm(
-              splitLines
+            onConfirm({
+              payments: splitLines
                 .map((line) => ({
                   amount: Number(line.amount || 0),
                   payment_mode: line.mode,
                   reference_no: line.referenceNo.trim() || undefined,
                 }))
-                .filter((line) => line.amount > 0)
-            )
+                .filter((line) => line.amount > 0),
+              print: {
+                enabled: printEnabled,
+                printer_type: printerType,
+              },
+            })
           }}
           className="mt-4 min-h-touch rounded-xl bg-green-600 text-white font-semibold hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
         >

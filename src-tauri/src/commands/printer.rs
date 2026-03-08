@@ -35,17 +35,30 @@ pub async fn printer_print_bill(state: State<'_, AppState>, bill_id: i64, printe
     let bill = db.get_bill_json(bill_id)?;
 
     let stamp = chrono::Utc::now().format("%Y%m%d_%H%M%S").to_string();
-    let file_name = format!("bill_{}_{}_{}.txt", bill_id, printer_type, stamp);
-    let path = job_dir()?.join(file_name);
-    let content = format!(
-        "PharmaCare Pro Print Job\nType: {}\nBill ID: {}\nGenerated At: {}\n\n{}\n",
-        printer_type,
-        bill_id,
-        chrono::Utc::now().to_rfc3339(),
-        json_pretty(&bill)?
-    );
-
-    fs::write(&path, content).map_err(|e| AppError::Internal(e.to_string()))?;
+    let (path, output_kind) = if printer_type == "thermal" {
+        // ESC/POS-style baseline output: text blocks encoded as bytes.
+        let file_name = format!("bill_{}_{}_{}.bin", bill_id, printer_type, stamp);
+        let path = job_dir()?.join(file_name);
+        let escpos_payload = format!(
+            "\x1b@\nPHARMACARE PRO\nBILL #{}\n{}\n\n{}\n\n\x1dV\x00",
+            bill_id,
+            chrono::Utc::now().to_rfc3339(),
+            json_pretty(&bill)?
+        );
+        fs::write(&path, escpos_payload.as_bytes()).map_err(|e| AppError::Internal(e.to_string()))?;
+        (path, "escpos_bin")
+    } else {
+        let file_name = format!("bill_{}_{}_{}.html", bill_id, printer_type, stamp);
+        let path = job_dir()?.join(file_name);
+        let html = format!(
+            "<!doctype html><html><head><meta charset=\"utf-8\"><title>Bill {}</title></head><body><h1>PharmaCare Pro</h1><p>Bill #{}</p><pre>{}</pre></body></html>",
+            bill_id,
+            bill_id,
+            json_pretty(&bill)?
+        );
+        fs::write(&path, html).map_err(|e| AppError::Internal(e.to_string()))?;
+        (path, "a4_html")
+    };
 
     db.write_audit_log(
         "PRINT_BILL_REQUESTED",
@@ -54,6 +67,7 @@ pub async fn printer_print_bill(state: State<'_, AppState>, bill_id: i64, printe
         None,
         Some(&serde_json::json!({
             "printer_type": printer_type,
+            "output_kind": output_kind,
             "job_file": path.to_string_lossy(),
         }).to_string()),
         "System",
