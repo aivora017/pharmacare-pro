@@ -30,7 +30,6 @@
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-dialog": "^2.0.0",
     "@tauri-apps/plugin-fs": "^2.0.0",
-    "@tauri-apps/plugin-keyring": "^2.0.0",
     "@tauri-apps/plugin-notification": "^2.0.0",
     "@tauri-apps/plugin-shell": "^2.0.0",
     "@tauri-apps/plugin-updater": "^2.0.0",
@@ -60,7 +59,7 @@
   "devDependencies": {
     "@tauri-apps/cli": "^2.0.0",
     "@types/bcryptjs": "^2.4.6",
-    "@types/jsbarcode": "^3.11.5",
+    "@types/jsbarcode": "^3.11.4",
     "@types/node": "^20.10.4",
     "@types/papaparse": "^5.3.14",
     "@types/react": "^18.2.43",
