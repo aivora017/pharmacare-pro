@@ -14,33 +14,251 @@
  * 6. Drug interaction check when adding each item
  * 7. Call billingService.createBill() on payment confirm
  */
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { ShoppingCart, Search, User, PauseCircle } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useCartStore } from '@/store/cartStore'
+import { useAuthStore } from '@/store/authStore'
 import { billingService } from '@/services/billingService'
+import {
+  medicineService,
+  type IBatchItem,
+  type IMedicineListItem,
+} from '@/services/medicineService'
+import type { ICartItem } from '@/types'
 import { formatCurrency } from '@/utils/currency'
+import { MedicineSearchDropdown } from './components/MedicineSearchDropdown'
+import { PaymentPanel } from './components/PaymentPanel'
+
+function makeCartItem(medicine: IMedicineListItem, batch: IBatchItem): ICartItem {
+  const nearExpiryDays = 90
+  const expiryMs = new Date(batch.expiry_date).getTime()
+  const nowMs = Date.now()
+  const daysToExpiry = Math.ceil((expiryMs - nowMs) / (24 * 60 * 60 * 1000))
+
+  return {
+    medicine_id: medicine.id,
+    batch_id: batch.id,
+    medicine_name: medicine.name,
+    batch_number: batch.batch_number,
+    expiry_date: batch.expiry_date,
+    quantity: 1,
+    unit_price: batch.selling_price,
+    mrp: batch.selling_price,
+    discount_percent: 0,
+    discount_amount: 0,
+    gst_rate: medicine.default_gst_rate,
+    cgst_amount: 0,
+    sgst_amount: 0,
+    igst_amount: 0,
+    total_amount: batch.selling_price,
+    is_near_expiry: daysToExpiry >= 0 && daysToExpiry <= nearExpiryDays,
+    interaction_warnings: [],
+  }
+}
 
 export default function BillingPage() {
   const searchRef = useRef<HTMLInputElement>(null)
   const [searchQuery, setSearchQuery] = useState('')
-  const [, setShowPayment] = useState(false)
-  const { items, customer, totals, removeItem, updateQuantity, updateItemDiscount, clear } =
-    useCartStore()
+  const [showPayment, setShowPayment] = useState(false)
+  const [searchResults, setSearchResults] = useState<IMedicineListItem[]>([])
+  const [isSearching, setIsSearching] = useState(false)
+  const [isAddingItem, setIsAddingItem] = useState(false)
+  const [isSavingBill, setIsSavingBill] = useState(false)
+  const scannerBufferRef = useRef('')
+  const scannerTsRef = useRef(0)
+  const user = useAuthStore((state) => state.user)
+  const {
+    items,
+    customer,
+    totals,
+    addItem,
+    removeItem,
+    updateQuantity,
+    updateItemDiscount,
+    clear,
+  } = useCartStore()
+
+  const addMedicineToCart = useCallback(
+    async (medicine: IMedicineListItem) => {
+      try {
+        setIsAddingItem(true)
+        const batches = await medicineService.listBatches(medicine.id)
+        const sellable = batches
+          .filter((batch) => batch.quantity_on_hand > 0)
+          .sort((a, b) => a.expiry_date.localeCompare(b.expiry_date))
+
+        if (sellable.length === 0) {
+          toast.error('No sellable batch available for this medicine.')
+          return
+        }
+
+        addItem(makeCartItem(medicine, sellable[0]))
+        setSearchQuery('')
+        setSearchResults([])
+        toast.success('Medicine added to bill.')
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : 'Failed to add medicine.'
+        toast.error(msg)
+      } finally {
+        setIsAddingItem(false)
+      }
+    },
+    [addItem]
+  )
+
+  const addBarcodeToCart = useCallback(
+    async (barcode: string) => {
+      try {
+        setIsAddingItem(true)
+        const batch = await medicineService.getBatchByBarcode(barcode)
+        if (batch.quantity_on_hand <= 0) {
+          toast.error('This batch is out of stock.')
+          return
+        }
+
+        const medicine = await medicineService.get(batch.medicine_id)
+        addItem(
+          makeCartItem(
+            {
+              id: medicine.id,
+              name: medicine.name,
+              generic_name: medicine.generic_name,
+              category_id: medicine.category_id,
+              category_name: medicine.category_name,
+              schedule: medicine.schedule,
+              default_gst_rate: medicine.default_gst_rate,
+              reorder_level: medicine.reorder_level,
+              total_stock: medicine.total_stock,
+              is_active: medicine.is_active,
+            },
+            batch
+          )
+        )
+        setSearchQuery('')
+        setSearchResults([])
+        toast.success('Barcode item added to bill.')
+      } catch {
+        toast.error('Barcode not found. Please search medicine manually.')
+      } finally {
+        setIsAddingItem(false)
+      }
+    },
+    [addItem]
+  )
+
+  const handlePaymentConfirm = async (
+    payments: { amount: number; payment_mode: string; reference_no?: string }[]
+  ) => {
+    if (!user) {
+      toast.error('Session expired. Please login again.')
+      return
+    }
+
+    try {
+      setIsSavingBill(true)
+      const billId = await billingService.createBill({
+        customer_id: customer?.id,
+        items,
+        payments,
+        discount_amount: totals.bill_discount,
+        created_by: user.id,
+      })
+      clear()
+      setShowPayment(false)
+      toast.success(`Bill #${billId} saved successfully.`)
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Failed to save bill.'
+      toast.error(msg)
+    } finally {
+      setIsSavingBill(false)
+    }
+  }
 
   useEffect(() => {
     searchRef.current?.focus()
   }, [])
+
+  useEffect(() => {
+    const q = searchQuery.trim()
+    if (q.length < 2) {
+      setSearchResults([])
+      setIsSearching(false)
+      return
+    }
+
+    let active = true
+    setIsSearching(true)
+    const timer = window.setTimeout(async () => {
+      try {
+        const result = await medicineService.search({
+          query: q,
+          in_stock_only: true,
+          sort: 'name_asc',
+        })
+        if (active) {
+          setSearchResults(result)
+        }
+      } catch {
+        if (active) {
+          setSearchResults([])
+          toast.error('Medicine search failed. Try again.')
+        }
+      } finally {
+        if (active) {
+          setIsSearching(false)
+        }
+      }
+    }, 250)
+
+    return () => {
+      active = false
+      window.clearTimeout(timer)
+    }
+  }, [searchQuery])
+
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null
+      const isEditableTarget =
+        target !== null &&
+        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT')
+
       if (e.key === 'F7' && items.length > 0) {
         e.preventDefault()
         setShowPayment(true)
+        return
+      }
+
+      if (showPayment) {
+        return
+      }
+
+      if (isEditableTarget && target !== searchRef.current) {
+        return
+      }
+
+      if (e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        const now = Date.now()
+        if (now - scannerTsRef.current > 75) {
+          scannerBufferRef.current = ''
+        }
+        scannerBufferRef.current += e.key
+        scannerTsRef.current = now
+        return
+      }
+
+      if (e.key === 'Enter') {
+        const barcode = scannerBufferRef.current.trim()
+        scannerBufferRef.current = ''
+        if (barcode.length >= 6) {
+          void addBarcodeToCart(barcode)
+        }
       }
     }
     window.addEventListener('keydown', h)
     return () => window.removeEventListener('keydown', h)
-  }, [items.length])
+  }, [items.length, addBarcodeToCart, showPayment])
 
   return (
     <div className="flex h-full bg-slate-50 -m-4 overflow-hidden">
@@ -63,9 +281,13 @@ export default function BillingPage() {
             {items.length > 0 && (
               <button
                 onClick={async () => {
-                  await billingService.holdBill({ items, customer })
-                  clear()
-                  toast.success('Bill held.')
+                  try {
+                    await billingService.holdBill({ items, customer })
+                    clear()
+                    toast.success('Bill held.')
+                  } catch {
+                    toast.error('Failed to hold bill. Please retry.')
+                  }
                 }}
                 className="flex items-center gap-1.5 px-3 py-2 text-sm border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors min-h-touch"
               >
@@ -82,13 +304,36 @@ export default function BillingPage() {
               ref={searchRef}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key !== 'Enter') {
+                  return
+                }
+
+                const trimmed = searchQuery.trim()
+                if (trimmed.length >= 6 && /^\d+$/.test(trimmed)) {
+                  e.preventDefault()
+                  void addBarcodeToCart(trimmed)
+                  return
+                }
+
+                if (searchResults.length === 1) {
+                  e.preventDefault()
+                  void addMedicineToCart(searchResults[0])
+                }
+              }}
               placeholder="Type medicine name or scan barcode to add..."
               autoComplete="off"
               className="w-full pl-10 pr-4 py-3 text-sm border-2 border-blue-200 focus:border-blue-500 rounded-xl outline-none bg-blue-50 focus:bg-white transition-colors"
             />
           </div>
-          {/* Copilot: render MedicineSearchDropdown here when searchQuery.length >= 2 */}
-          {/* File: src/pages/Billing/components/MedicineSearchDropdown.tsx */}
+          <MedicineSearchDropdown
+            query={searchQuery}
+            results={searchResults}
+            isLoading={isSearching || isAddingItem}
+            onSelect={(medicine) => {
+              void addMedicineToCart(medicine)
+            }}
+          />
         </div>
         <div className="flex-1 overflow-y-auto">
           {items.length === 0 ? (
@@ -208,7 +453,16 @@ export default function BillingPage() {
           </div>
         )}
       </div>
-      {/* Copilot: mount PaymentPanel when showPayment=true */}
+      {showPayment && (
+        <PaymentPanel
+          netAmount={totals.net_amount}
+          isSaving={isSavingBill}
+          onClose={() => setShowPayment(false)}
+          onConfirm={(payments) => {
+            void handlePaymentConfirm(payments)
+          }}
+        />
+      )}
     </div>
   )
 }
