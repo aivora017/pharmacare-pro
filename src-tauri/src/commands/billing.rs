@@ -58,24 +58,24 @@ pub async fn billing_create_bill(
 pub async fn billing_cancel_bill(
     state: State<'_, AppState>, bill_id: i64, reason: String, user_id: i64
 ) -> Result<(), AppError> {
-    // TODO: check status=active, UPDATE status=cancelled, REVERSE batch quantities, audit
-    todo!("billing_cancel_bill")
+    let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+    db.cancel_bill(bill_id, &reason, user_id)
 }
 
 #[tauri::command]
 pub async fn billing_get_bill(
     state: State<'_, AppState>, bill_id: i64
 ) -> Result<serde_json::Value, AppError> {
-    // TODO: SELECT bill + bill_items + payments as JSON
-    todo!("billing_get_bill")
+    let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+    db.get_bill_json(bill_id)
 }
 
 #[tauri::command]
 pub async fn billing_list_bills(
     state: State<'_, AppState>, filters: serde_json::Value
 ) -> Result<serde_json::Value, AppError> {
-    // TODO: filter by date, customer, status; paginate; return {bills, total}
-    todo!("billing_list_bills")
+    let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+    db.list_bills(&filters)
 }
 
 #[tauri::command]
@@ -90,16 +90,16 @@ pub async fn billing_hold_bill(
 pub async fn billing_get_held_bills(
     state: State<'_, AppState>
 ) -> Result<serde_json::Value, AppError> {
-    // TODO: SELECT from held_bills ORDER BY created_at DESC
-    todo!("billing_get_held_bills")
+    let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+    db.get_held_bills()
 }
 
 #[tauri::command]
 pub async fn billing_restore_held_bill(
     state: State<'_, AppState>, held_bill_id: i64
 ) -> Result<serde_json::Value, AppError> {
-    // TODO: SELECT cart_data, parse JSON, DELETE the held bill, return cart items
-    todo!("billing_restore_held_bill")
+    let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+    db.restore_held_bill(held_bill_id)
 }
 
 #[tauri::command]
@@ -115,7 +115,7 @@ pub async fn billing_create_return(
 pub async fn billing_get_today_summary(
     state: State<'_, AppState>
 ) -> Result<serde_json::Value, AppError> {
-    // TODO: SUM/COUNT from bills + payments WHERE date(bill_date)=date('now') AND status='active'
-    todo!("billing_get_today_summary")
+    let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+    db.get_today_summary()
 }
 

@@ -53,23 +53,23 @@
 
 ## PHASE 3 — Billing / POS (Weeks 4–6)
 
-- [ ] Medicine search in POS (src/pages/Billing/index.tsx)
+- [x] Medicine search in POS (src/pages/Billing/index.tsx)
 - [ ] Barcode scan support (USB scanner + camera)
-- [ ] Add item to cart with FEFO batch selection
-- [ ] Update quantity with +/- buttons and direct typing
-- [ ] Item-level discount (%)
-- [ ] Bill-level discount (₹ flat or %)
-- [ ] GST calculation (CGST + SGST for intrastate)
-- [ ] Payment panel: Cash, UPI, Card, Credit modes
-- [ ] Cash denomination calculator (enter amount → show change)
-- [ ] Split payment (two modes on same bill)
-- [ ] Save bill (billingService.createBill)
+- [x] Add item to cart with FEFO batch selection
+- [x] Update quantity with +/- buttons and direct typing
+- [x] Item-level discount (%)
+- [x] Bill-level discount (₹ flat or %)
+- [x] GST calculation (CGST + SGST for intrastate)
+- [x] Payment panel: Cash, UPI, Card, Credit modes
+- [x] Cash denomination calculator (enter amount → show change)
+- [x] Split payment (two modes on same bill)
+- [x] Save bill (billingService.createBill)
 - [ ] Print thermal bill (80mm ESC/POS)
 - [ ] Print A4 bill (OS print dialog)
-- [ ] Hold bill (F4) and recall held bills (F5)
+- [x] Hold bill (F4) and recall held bills (F5)
 - [ ] Link customer to bill (customer search popup)
 - [ ] Drug interaction check (basic version — rule-based)
-- [ ] Near-expiry warning on bill items (< 30 days)
+- [x] Near-expiry warning on bill items (< 30 days)
 
 ## PHASE 4 — Purchase & Suppliers (Weeks 7–9)
 

@@ -462,6 +462,388 @@ impl Database {
         Ok(())
     }
 
+    pub fn get_held_bills(&self) -> Result<serde_json::Value, AppError> {
+        let conn = self.connection()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, label, created_at
+                 FROM held_bills
+                 ORDER BY datetime(created_at) DESC, id DESC",
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(serde_json::json!({
+                    "id": row.get::<_, i64>(0)?,
+                    "label": row.get::<_, String>(1)?,
+                    "created_at": row.get::<_, String>(2)?,
+                }))
+            })
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let mut items = Vec::new();
+        for row in rows {
+            items.push(row.map_err(|e| AppError::Internal(e.to_string()))?);
+        }
+
+        Ok(serde_json::Value::Array(items))
+    }
+
+    pub fn restore_held_bill(&self, held_bill_id: i64) -> Result<serde_json::Value, AppError> {
+        let mut conn = self.connection()?;
+        let tx = conn
+            .transaction()
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let cart_data: String = tx
+            .query_row(
+                "SELECT cart_data FROM held_bills WHERE id = ?1",
+                params![held_bill_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|e| AppError::Internal(e.to_string()))?
+            .ok_or_else(|| AppError::Validation("Held bill not found.".to_string()))?;
+
+        tx.execute("DELETE FROM held_bills WHERE id = ?1", params![held_bill_id])
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+        tx.commit().map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let payload: serde_json::Value =
+            serde_json::from_str(&cart_data).map_err(|e| AppError::Internal(e.to_string()))?;
+        let items = payload
+            .get("items")
+            .cloned()
+            .unwrap_or_else(|| serde_json::Value::Array(vec![]));
+
+        Ok(items)
+    }
+
+    pub fn get_bill_json(&self, bill_id: i64) -> Result<serde_json::Value, AppError> {
+        let conn = self.connection()?;
+
+        let bill = conn
+            .query_row(
+                "SELECT
+                    id, bill_number, customer_id, doctor_id, bill_date, status,
+                    subtotal, discount_amount, taxable_amount,
+                    cgst_amount, sgst_amount, igst_amount,
+                    total_amount, round_off, net_amount,
+                    amount_paid, change_returned, outstanding,
+                    loyalty_points_earned, loyalty_points_redeemed,
+                    notes, created_by, created_at
+                 FROM bills
+                 WHERE id = ?1",
+                params![bill_id],
+                |row| {
+                    Ok(serde_json::json!({
+                        "id": row.get::<_, i64>(0)?,
+                        "bill_number": row.get::<_, String>(1)?,
+                        "customer_id": row.get::<_, Option<i64>>(2)?,
+                        "doctor_id": row.get::<_, Option<i64>>(3)?,
+                        "bill_date": row.get::<_, String>(4)?,
+                        "status": row.get::<_, String>(5)?,
+                        "subtotal": row.get::<_, f64>(6)?,
+                        "discount_amount": row.get::<_, f64>(7)?,
+                        "taxable_amount": row.get::<_, f64>(8)?,
+                        "cgst_amount": row.get::<_, f64>(9)?,
+                        "sgst_amount": row.get::<_, f64>(10)?,
+                        "igst_amount": row.get::<_, f64>(11)?,
+                        "total_amount": row.get::<_, f64>(12)?,
+                        "round_off": row.get::<_, f64>(13)?,
+                        "net_amount": row.get::<_, f64>(14)?,
+                        "amount_paid": row.get::<_, f64>(15)?,
+                        "change_returned": row.get::<_, f64>(16)?,
+                        "outstanding": row.get::<_, f64>(17)?,
+                        "loyalty_points_earned": row.get::<_, i64>(18)?,
+                        "loyalty_points_redeemed": row.get::<_, i64>(19)?,
+                        "notes": row.get::<_, Option<String>>(20)?,
+                        "created_by": row.get::<_, i64>(21)?,
+                        "created_at": row.get::<_, String>(22)?,
+                    }))
+                },
+            )
+            .optional()
+            .map_err(|e| AppError::Internal(e.to_string()))?
+            .ok_or_else(|| AppError::Validation("Bill not found.".to_string()))?;
+
+        let mut item_stmt = conn
+            .prepare(
+                "SELECT
+                    id, bill_id, medicine_id, batch_id,
+                    medicine_name, batch_number, expiry_date,
+                    quantity, unit_price, mrp,
+                    discount_percent, discount_amount, gst_rate,
+                    cgst_amount, sgst_amount, igst_amount, total_amount
+                 FROM bill_items
+                 WHERE bill_id = ?1
+                 ORDER BY id ASC",
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let item_rows = item_stmt
+            .query_map(params![bill_id], |row| {
+                Ok(serde_json::json!({
+                    "id": row.get::<_, i64>(0)?,
+                    "bill_id": row.get::<_, i64>(1)?,
+                    "medicine_id": row.get::<_, i64>(2)?,
+                    "batch_id": row.get::<_, i64>(3)?,
+                    "medicine_name": row.get::<_, String>(4)?,
+                    "batch_number": row.get::<_, String>(5)?,
+                    "expiry_date": row.get::<_, String>(6)?,
+                    "quantity": row.get::<_, i64>(7)?,
+                    "unit_price": row.get::<_, f64>(8)?,
+                    "mrp": row.get::<_, f64>(9)?,
+                    "discount_percent": row.get::<_, f64>(10)?,
+                    "discount_amount": row.get::<_, f64>(11)?,
+                    "gst_rate": row.get::<_, f64>(12)?,
+                    "cgst_amount": row.get::<_, f64>(13)?,
+                    "sgst_amount": row.get::<_, f64>(14)?,
+                    "igst_amount": row.get::<_, f64>(15)?,
+                    "total_amount": row.get::<_, f64>(16)?,
+                }))
+            })
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let mut items = Vec::new();
+        for row in item_rows {
+            items.push(row.map_err(|e| AppError::Internal(e.to_string()))?);
+        }
+
+        let mut payment_stmt = conn
+            .prepare(
+                "SELECT id, amount, payment_mode, reference_no, payment_date
+                 FROM payments
+                 WHERE bill_id = ?1
+                 ORDER BY id ASC",
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let payment_rows = payment_stmt
+            .query_map(params![bill_id], |row| {
+                Ok(serde_json::json!({
+                    "id": row.get::<_, i64>(0)?,
+                    "amount": row.get::<_, f64>(1)?,
+                    "payment_mode": row.get::<_, String>(2)?,
+                    "reference_no": row.get::<_, Option<String>>(3)?,
+                    "payment_date": row.get::<_, String>(4)?,
+                }))
+            })
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let mut payments = Vec::new();
+        for row in payment_rows {
+            payments.push(row.map_err(|e| AppError::Internal(e.to_string()))?);
+        }
+
+        let mut bill_with_lines = bill;
+        if let serde_json::Value::Object(ref mut map) = bill_with_lines {
+            map.insert("items".to_string(), serde_json::Value::Array(items));
+            map.insert("payments".to_string(), serde_json::Value::Array(payments));
+        }
+
+        Ok(bill_with_lines)
+    }
+
+    pub fn list_bills(&self, filters: &serde_json::Value) -> Result<serde_json::Value, AppError> {
+        let conn = self.connection()?;
+        let status = filters.get("status").and_then(|v| v.as_str());
+        let customer_id = filters.get("customer_id").and_then(|v| v.as_i64());
+        let page = filters.get("page").and_then(|v| v.as_i64()).unwrap_or(1).max(1);
+        let page_size = filters
+            .get("page_size")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(50)
+            .clamp(1, 200);
+        let offset = (page - 1) * page_size;
+
+        let total: i64 = conn
+            .query_row(
+                "SELECT COUNT(1)
+                 FROM bills
+                 WHERE (?1 IS NULL OR status = ?1)
+                   AND (?2 IS NULL OR customer_id = ?2)",
+                params![status, customer_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let mut stmt = conn
+            .prepare(
+                "SELECT
+                    id, bill_number, customer_id, doctor_id, bill_date, status,
+                    subtotal, discount_amount, taxable_amount,
+                    cgst_amount, sgst_amount, igst_amount,
+                    total_amount, round_off, net_amount,
+                    amount_paid, change_returned, outstanding,
+                    loyalty_points_earned, loyalty_points_redeemed,
+                    notes, created_by, created_at
+                 FROM bills
+                 WHERE (?1 IS NULL OR status = ?1)
+                   AND (?2 IS NULL OR customer_id = ?2)
+                 ORDER BY datetime(bill_date) DESC, id DESC
+                 LIMIT ?3 OFFSET ?4",
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let rows = stmt
+            .query_map(params![status, customer_id, page_size, offset], |row| {
+                Ok(serde_json::json!({
+                    "id": row.get::<_, i64>(0)?,
+                    "bill_number": row.get::<_, String>(1)?,
+                    "customer_id": row.get::<_, Option<i64>>(2)?,
+                    "doctor_id": row.get::<_, Option<i64>>(3)?,
+                    "bill_date": row.get::<_, String>(4)?,
+                    "status": row.get::<_, String>(5)?,
+                    "subtotal": row.get::<_, f64>(6)?,
+                    "discount_amount": row.get::<_, f64>(7)?,
+                    "taxable_amount": row.get::<_, f64>(8)?,
+                    "cgst_amount": row.get::<_, f64>(9)?,
+                    "sgst_amount": row.get::<_, f64>(10)?,
+                    "igst_amount": row.get::<_, f64>(11)?,
+                    "total_amount": row.get::<_, f64>(12)?,
+                    "round_off": row.get::<_, f64>(13)?,
+                    "net_amount": row.get::<_, f64>(14)?,
+                    "amount_paid": row.get::<_, f64>(15)?,
+                    "change_returned": row.get::<_, f64>(16)?,
+                    "outstanding": row.get::<_, f64>(17)?,
+                    "loyalty_points_earned": row.get::<_, i64>(18)?,
+                    "loyalty_points_redeemed": row.get::<_, i64>(19)?,
+                    "notes": row.get::<_, Option<String>>(20)?,
+                    "created_by": row.get::<_, i64>(21)?,
+                    "created_at": row.get::<_, String>(22)?,
+                }))
+            })
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let mut bills = Vec::new();
+        for row in rows {
+            bills.push(row.map_err(|e| AppError::Internal(e.to_string()))?);
+        }
+
+        Ok(serde_json::json!({
+            "bills": bills,
+            "total": total,
+        }))
+    }
+
+    pub fn cancel_bill(&self, bill_id: i64, reason: &str, user_id: i64) -> Result<(), AppError> {
+        let mut conn = self.connection()?;
+        let tx = conn
+            .transaction()
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let status: String = tx
+            .query_row(
+                "SELECT status FROM bills WHERE id = ?1",
+                params![bill_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|e| AppError::Internal(e.to_string()))?
+            .ok_or_else(|| AppError::Validation("Bill not found.".to_string()))?;
+
+        if status != "active" {
+            return Err(AppError::Validation("Only active bills can be cancelled.".to_string()));
+        }
+
+        let mut bill_items: Vec<(i64, i64)> = Vec::new();
+        {
+            let mut item_stmt = tx
+                .prepare("SELECT batch_id, quantity FROM bill_items WHERE bill_id = ?1")
+                .map_err(|e| AppError::Internal(e.to_string()))?;
+            let item_rows = item_stmt
+                .query_map(params![bill_id], |row| {
+                    Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
+                })
+                .map_err(|e| AppError::Internal(e.to_string()))?;
+
+            for item in item_rows {
+                bill_items.push(item.map_err(|e| AppError::Internal(e.to_string()))?);
+            }
+        }
+
+        for (batch_id, qty) in bill_items {
+            tx.execute(
+                "UPDATE batches
+                 SET quantity_sold = CASE WHEN quantity_sold - ?1 < 0 THEN 0 ELSE quantity_sold - ?1 END,
+                     updated_at = datetime('now')
+                 WHERE id = ?2",
+                params![qty, batch_id],
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+        }
+
+        tx.execute(
+            "UPDATE bills
+             SET status = 'cancelled', cancel_reason = ?1, cancelled_by = ?2, cancelled_at = datetime('now')
+             WHERE id = ?3",
+            params![reason, user_id, bill_id],
+        )
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        tx.execute(
+            "INSERT INTO audit_log (user_id, user_name, action, module, record_id, old_value, new_value, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                user_id,
+                format!("user:{}", user_id),
+                "BILL_CANCELLED",
+                "billing",
+                bill_id.to_string(),
+                Option::<String>::None,
+                serde_json::json!({"reason": reason}).to_string(),
+                chrono::Utc::now().to_rfc3339(),
+            ],
+        )
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        tx.commit().map_err(|e| AppError::Internal(e.to_string()))?;
+        Ok(())
+    }
+
+    pub fn get_today_summary(&self) -> Result<serde_json::Value, AppError> {
+        let conn = self.connection()?;
+
+        let (total_revenue, bill_count, avg_bill_value): (f64, i64, f64) = conn
+            .query_row(
+                "SELECT
+                    COALESCE(SUM(net_amount), 0),
+                    COUNT(*),
+                    COALESCE(AVG(net_amount), 0)
+                 FROM bills
+                 WHERE date(bill_date) = date('now') AND status = 'active'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let payment_total_for_mode = |mode: &str| -> Result<f64, AppError> {
+            conn.query_row(
+                "SELECT COALESCE(SUM(p.amount), 0)
+                 FROM payments p
+                 JOIN bills b ON b.id = p.bill_id
+                 WHERE date(p.payment_date) = date('now')
+                   AND b.status = 'active'
+                   AND p.payment_mode = ?1",
+                params![mode],
+                |row| row.get(0),
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))
+        };
+
+        Ok(serde_json::json!({
+            "total_revenue": total_revenue,
+            "bill_count": bill_count,
+            "avg_bill_value": avg_bill_value,
+            "cash_amount": payment_total_for_mode("cash")?,
+            "upi_amount": payment_total_for_mode("upi")?,
+            "card_amount": payment_total_for_mode("card")?,
+            "credit_amount": payment_total_for_mode("credit")?,
+        }))
+    }
+
     pub fn update_password(&self, user_id: i64, new_hash: &str) -> Result<(), AppError> {
         let conn = self.connection()?;
         let changed = conn

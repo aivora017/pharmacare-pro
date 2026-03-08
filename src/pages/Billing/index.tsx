@@ -19,7 +19,7 @@ import { ShoppingCart, Search, User, PauseCircle } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useCartStore } from '@/store/cartStore'
 import { useAuthStore } from '@/store/authStore'
-import { billingService } from '@/services/billingService'
+import { billingService, type IHeldBillSummary } from '@/services/billingService'
 import {
   medicineService,
   type IBatchItem,
@@ -31,7 +31,7 @@ import { MedicineSearchDropdown } from './components/MedicineSearchDropdown'
 import { PaymentPanel } from './components/PaymentPanel'
 
 function makeCartItem(medicine: IMedicineListItem, batch: IBatchItem): ICartItem {
-  const nearExpiryDays = 90
+  const nearExpiryDays = 30
   const expiryMs = new Date(batch.expiry_date).getTime()
   const nowMs = Date.now()
   const daysToExpiry = Math.ceil((expiryMs - nowMs) / (24 * 60 * 60 * 1000))
@@ -65,6 +65,9 @@ export default function BillingPage() {
   const [isSearching, setIsSearching] = useState(false)
   const [isAddingItem, setIsAddingItem] = useState(false)
   const [isSavingBill, setIsSavingBill] = useState(false)
+  const [showHeldBills, setShowHeldBills] = useState(false)
+  const [isLoadingHeldBills, setIsLoadingHeldBills] = useState(false)
+  const [heldBills, setHeldBills] = useState<IHeldBillSummary[]>([])
   const scannerBufferRef = useRef('')
   const scannerTsRef = useRef(0)
   const user = useAuthStore((state) => state.user)
@@ -76,8 +79,44 @@ export default function BillingPage() {
     removeItem,
     updateQuantity,
     updateItemDiscount,
+    billDiscount,
+    setBillDiscount,
+    setCustomer,
     clear,
   } = useCartStore()
+
+  const loadHeldBills = useCallback(async () => {
+    try {
+      setIsLoadingHeldBills(true)
+      const rows = await billingService.getHeldBills()
+      setHeldBills(rows)
+    } catch {
+      toast.error('Failed to load held bills.')
+    } finally {
+      setIsLoadingHeldBills(false)
+    }
+  }, [])
+
+  const recallHeldBill = useCallback(
+    async (heldBillId: number) => {
+      try {
+        setIsLoadingHeldBills(true)
+        const restoredItems = await billingService.restoreHeldBill(heldBillId)
+        clear()
+        setCustomer(null)
+        for (const item of restoredItems) {
+          addItem(item)
+        }
+        setShowHeldBills(false)
+        toast.success('Held bill restored.')
+      } catch {
+        toast.error('Failed to restore held bill.')
+      } finally {
+        setIsLoadingHeldBills(false)
+      }
+    },
+    [addItem, clear, setCustomer]
+  )
 
   const addMedicineToCart = useCallback(
     async (medicine: IMedicineListItem) => {
@@ -230,6 +269,19 @@ export default function BillingPage() {
         return
       }
 
+      if (e.key === 'F5') {
+        e.preventDefault()
+        setShowHeldBills(true)
+        void loadHeldBills()
+        return
+      }
+
+      if (e.key === 'Escape') {
+        setShowPayment(false)
+        setShowHeldBills(false)
+        return
+      }
+
       if (showPayment) {
         return
       }
@@ -258,7 +310,7 @@ export default function BillingPage() {
     }
     window.addEventListener('keydown', h)
     return () => window.removeEventListener('keydown', h)
-  }, [items.length, addBarcodeToCart, showPayment])
+  }, [items.length, addBarcodeToCart, showPayment, loadHeldBills])
 
   return (
     <div className="flex h-full bg-slate-50 -m-4 overflow-hidden">
@@ -282,7 +334,12 @@ export default function BillingPage() {
               <button
                 onClick={async () => {
                   try {
-                    await billingService.holdBill({ items, customer })
+                    await billingService.holdBill({
+                      items,
+                      customer,
+                      created_by: user?.id,
+                      label: `Held ${new Date().toLocaleTimeString()}`,
+                    })
                     clear()
                     toast.success('Bill held.')
                   } catch {
@@ -295,6 +352,15 @@ export default function BillingPage() {
                 Hold<kbd className="ml-1 text-slate-400 text-xs font-mono">F4</kbd>
               </button>
             )}
+            <button
+              onClick={() => {
+                setShowHeldBills(true)
+                void loadHeldBills()
+              }}
+              className="flex items-center gap-1.5 px-3 py-2 text-sm border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors min-h-touch"
+            >
+              Held Bills<kbd className="ml-1 text-slate-400 text-xs font-mono">F5</kbd>
+            </button>
           </div>
         </div>
         <div className="px-4 py-3 bg-white border-b border-slate-200">
@@ -431,8 +497,22 @@ export default function BillingPage() {
                   Subtotal: ₹{totals.subtotal.toFixed(2)} &nbsp;|&nbsp; GST: ₹
                   {totals.total_gst.toFixed(2)}
                 </p>
+                <div className="flex items-center gap-2">
+                  <label className="text-xs text-slate-500">Bill discount (₹)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={billDiscount}
+                    onChange={(e) => setBillDiscount(Math.max(0, Number(e.target.value) || 0))}
+                    className="w-24 text-center border border-slate-300 rounded text-sm py-0.5 outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                </div>
                 {totals.item_discount > 0 && (
                   <p className="text-green-600">Discount: -₹{totals.item_discount.toFixed(2)}</p>
+                )}
+                {totals.bill_discount > 0 && (
+                  <p className="text-green-600">Bill discount: -₹{totals.bill_discount.toFixed(2)}</p>
                 )}
               </div>
               <div className="flex items-center gap-4">
@@ -462,6 +542,49 @@ export default function BillingPage() {
             void handlePaymentConfirm(payments)
           }}
         />
+      )}
+      {showHeldBills && (
+        <div className="fixed inset-0 z-30 bg-black/20 flex items-center justify-center p-4">
+          <div className="w-full max-w-lg rounded-xl border border-slate-200 bg-white shadow-xl">
+            <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between">
+              <h3 className="font-semibold text-slate-800">Held Bills</h3>
+              <button
+                type="button"
+                onClick={() => setShowHeldBills(false)}
+                className="min-h-touch px-3 rounded-lg border border-slate-300 text-sm hover:bg-slate-50"
+              >
+                Close
+              </button>
+            </div>
+            <div className="max-h-80 overflow-y-auto">
+              {isLoadingHeldBills ? (
+                <p className="px-4 py-4 text-sm text-slate-500">Loading held bills...</p>
+              ) : heldBills.length === 0 ? (
+                <p className="px-4 py-4 text-sm text-slate-500">No held bill found.</p>
+              ) : (
+                <ul className="divide-y divide-slate-100">
+                  {heldBills.map((bill) => (
+                    <li key={bill.id} className="px-4 py-3 flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium text-slate-800">{bill.label}</p>
+                        <p className="text-xs text-slate-500">{bill.created_at}</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void recallHeldBill(bill.id)
+                        }}
+                        className="min-h-touch px-3 rounded-lg bg-blue-600 text-white text-sm hover:bg-blue-700"
+                      >
+                        Recall
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

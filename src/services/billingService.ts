@@ -12,6 +12,12 @@ export interface CreateBillInput {
   discount_amount?: number; notes?: string; created_by: number
 }
 
+export interface IHeldBillSummary {
+  id: number
+  label: string
+  created_at: string
+}
+
 export const billingService = {
   createBill:         async (input: CreateBillInput): Promise<number> =>
     invoke<number>("billing_create_bill", { input }),
@@ -21,9 +27,9 @@ export const billingService = {
     invoke<IBill>("billing_get_bill", { billId }),
   listBills:          async (filters: Record<string,unknown>): Promise<{ bills: IBill[]; total: number }> =>
     invoke("billing_list_bills", { filters }),
-  holdBill:           async (data: { items: ICartItem[]; customer?: Partial<ICustomer>|null; label?: string }): Promise<void> =>
+  holdBill:           async (data: { items: ICartItem[]; customer?: Partial<ICustomer>|null; label?: string; created_by?: number }): Promise<void> =>
     invoke("billing_hold_bill", { input: data }),
-  getHeldBills:       async () => invoke("billing_get_held_bills"),
+  getHeldBills:       async (): Promise<IHeldBillSummary[]> => invoke("billing_get_held_bills"),
   restoreHeldBill:    async (id: number): Promise<ICartItem[]> =>
     invoke("billing_restore_held_bill", { heldBillId: id }),
   createReturn:       async (originalBillId: number, items: unknown, reason: string, userId: number): Promise<number> =>
