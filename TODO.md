@@ -54,7 +54,8 @@
 ## PHASE 3 — Billing / POS (Weeks 4–6)
 
 - [x] Medicine search in POS (src/pages/Billing/index.tsx)
-- [ ] Barcode scan support (USB scanner + camera)
+- [x] Barcode scan support (USB scanner wedge input)
+- [ ] Barcode scan support (camera)
 - [x] Add item to cart with FEFO batch selection
 - [x] Update quantity with +/- buttons and direct typing
 - [x] Item-level discount (%)

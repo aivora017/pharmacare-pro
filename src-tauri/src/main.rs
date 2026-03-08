@@ -22,7 +22,7 @@ mod security;
 mod background;
 mod error;
 
-use commands::{auth, billing, customer, medicine, settings};
+use commands::{auth, billing, customer, medicine, printer, settings};
 use db::Database;
 use std::sync::Mutex;
 use tauri::Manager;
@@ -100,6 +100,12 @@ fn main() {
             // Customers
             customer::customer_search,
             customer::customer_create,
+
+            // Printing
+            printer::printer_list_printers,
+            printer::printer_print_bill,
+            printer::printer_print_labels,
+            printer::printer_test_print,
         ])
         .run(tauri::generate_context!())
         .expect("Error starting PharmaCare Pro");

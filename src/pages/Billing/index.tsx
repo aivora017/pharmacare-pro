@@ -20,6 +20,7 @@ import toast from 'react-hot-toast'
 import { useCartStore } from '@/store/cartStore'
 import { useAuthStore } from '@/store/authStore'
 import { billingService, type IHeldBillSummary } from '@/services/billingService'
+import { printerService } from '@/services/printerService'
 import {
   medicineService,
   type IBatchItem,
@@ -71,7 +72,8 @@ export default function BillingPage() {
   const [isLoadingHeldBills, setIsLoadingHeldBills] = useState(false)
   const [heldBills, setHeldBills] = useState<IHeldBillSummary[]>([])
   const scannerBufferRef = useRef('')
-  const scannerTsRef = useRef(0)
+  const scannerFirstTsRef = useRef(0)
+  const scannerLastTsRef = useRef(0)
   const user = useAuthStore((state) => state.user)
   const {
     items,
@@ -233,6 +235,17 @@ export default function BillingPage() {
       clear()
       setShowPayment(false)
       toast.success(`Bill #${billId} saved successfully.`)
+
+      // Keep print flow simple and explicit for billing staff.
+      const shouldPrint = window.confirm('Print bill now?')
+      if (shouldPrint) {
+        try {
+          await printerService.printBill(billId, 'thermal')
+          toast.success('Print job queued.')
+        } catch {
+          toast.error('Print failed. Please retry from bill history.')
+        }
+      }
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'Failed to save bill.'
       toast.error(msg)
@@ -319,18 +332,31 @@ export default function BillingPage() {
 
       if (e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) {
         const now = Date.now()
-        if (now - scannerTsRef.current > 75) {
+        if (now - scannerLastTsRef.current > 100) {
           scannerBufferRef.current = ''
+          scannerFirstTsRef.current = now
+        } else if (!scannerFirstTsRef.current) {
+          scannerFirstTsRef.current = now
         }
         scannerBufferRef.current += e.key
-        scannerTsRef.current = now
+        scannerLastTsRef.current = now
         return
       }
 
       if (e.key === 'Enter') {
         const barcode = scannerBufferRef.current.trim()
+        const firstTs = scannerFirstTsRef.current
+        const lastTs = scannerLastTsRef.current
         scannerBufferRef.current = ''
-        if (barcode.length >= 6) {
+        scannerFirstTsRef.current = 0
+        scannerLastTsRef.current = 0
+
+        const charCount = barcode.length
+        const totalMs = firstTs > 0 && lastTs >= firstTs ? lastTs - firstTs : Number.MAX_SAFE_INTEGER
+        const avgMsPerChar = charCount > 1 ? totalMs / (charCount - 1) : Number.MAX_SAFE_INTEGER
+        const looksLikeScannerInput = charCount >= 6 && avgMsPerChar <= 35
+
+        if (looksLikeScannerInput) {
           void addBarcodeToCart(barcode)
         }
       }
