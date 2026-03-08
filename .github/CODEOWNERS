@@ -1,11 +1,11 @@
 # Default reviewers for all files
-* @YOUR_GITHUB_USERNAME
+* aivora017
 
 # Frontend
-/src/ @YOUR_GITHUB_USERNAME
+/src/ aivora017
 
 # Backend (Tauri/Rust)
-/src-tauri/ @YOUR_GITHUB_USERNAME
+/src-tauri/ aivora017
 
 # CI and project governance
-/.github/ @YOUR_GITHUB_USERNAME
+/.github/ aivora017

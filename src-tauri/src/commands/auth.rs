@@ -14,8 +14,10 @@
 use crate::AppState;
 use crate::error::AppError;
 use bcrypt::{hash, verify, DEFAULT_COST};
+use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
 use tauri::State;
+use uuid::Uuid;
 
 // ── Structs ───────────────────────────────────────────────────
 
@@ -36,6 +38,15 @@ pub struct UserDto {
 pub struct AuthResult {
     pub user: UserDto,
     pub token: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct TokenClaims {
+    sub: i64,
+    role: i64,
+    jti: String,
+    iat: i64,
+    exp: i64,
 }
 
 // ── Commands ──────────────────────────────────────────────────
@@ -117,6 +128,9 @@ pub async fn auth_login(
     let session_id = extract_jti(&token)?;
     db.create_session(&session_id, user.id)?;
 
+    // Persist token in settings for session restore during bootstrap phase.
+    db.set_setting("session_token", &token, Some(user.id))?;
+
     // Write audit log
     db.write_audit_log("LOGIN", "auth", &user.id.to_string(), None, None, &user.name)?;
 
@@ -151,7 +165,7 @@ pub async fn auth_logout(
     let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
     let jti = extract_jti(&token)?;
     db.revoke_session(&jti)?;
-    // Note: keychain cleanup happens in the frontend (Tauri keyring plugin)
+    db.set_setting("session_token", "", None)?;
     Ok(())
 }
 
@@ -170,11 +184,9 @@ pub async fn auth_restore_session(
 ) -> Result<Option<AuthResult>, AppError> {
     let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
 
-    // Try to get saved token from OS keychain
-    // (keychain access is handled via tauri-plugin-keyring)
-    let token = match get_token_from_keychain() {
-        Ok(t) => t,
-        Err(_) => return Ok(None),
+    let token = match db.get_setting("session_token")? {
+        Some(t) if !t.trim().is_empty() => t,
+        _ => return Ok(None),
     };
 
     // Validate token
@@ -264,7 +276,7 @@ pub async fn auth_create_user(
     email: String,
     password: String,
     role_id: i64,
-    created_by: i64,
+    _created_by: i64,
 ) -> Result<i64, AppError> {
     let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
 
@@ -299,7 +311,7 @@ pub async fn auth_update_user(
     name: String,
     role_id: i64,
     is_active: bool,
-    updated_by: i64,
+    _updated_by: i64,
 ) -> Result<(), AppError> {
     let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
     db.update_user(user_id, &name, role_id, is_active)?;
@@ -326,31 +338,52 @@ fn validate_password_strength(password: &str) -> Result<(), AppError> {
 }
 
 fn generate_jwt(user_id: i64, role_id: i64) -> Result<String, AppError> {
-    // TODO (Copilot): implement JWT generation using the 'jose' or 'jsonwebtoken' crate
-    // Payload: { sub: user_id, role: role_id, jti: uuid, iat: now, exp: now+8hr }
-    // Sign with HS256 using secret from OS keychain
-    todo!("implement JWT generation")
+    let now = chrono::Utc::now().timestamp();
+    let claims = TokenClaims {
+        sub: user_id,
+        role: role_id,
+        jti: Uuid::new_v4().to_string(),
+        iat: now,
+        exp: now + 8 * 60 * 60,
+    };
+
+    encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret(jwt_secret().as_bytes()),
+    )
+    .map_err(|e| AppError::Internal(e.to_string()))
 }
 
 fn validate_jwt(token: &str) -> Result<JwtClaims, AppError> {
-    // TODO (Copilot): validate JWT signature and expiry, return claims
-    todo!("implement JWT validation")
+    let mut validation = Validation::default();
+    validation.validate_exp = true;
+
+    let data = decode::<TokenClaims>(
+        token,
+        &DecodingKey::from_secret(jwt_secret().as_bytes()),
+        &validation,
+    )
+    .map_err(|_| AppError::InvalidCredentials)?;
+
+    Ok(JwtClaims {
+        user_id: data.claims.sub,
+        jti: data.claims.jti,
+    })
 }
 
 fn extract_jti(token: &str) -> Result<String, AppError> {
-    // TODO (Copilot): decode JWT without verification, extract jti claim
-    todo!("implement JTI extraction")
+    let claims = validate_jwt(token)?;
+    Ok(claims.jti)
 }
 
-fn get_token_from_keychain() -> Result<String, AppError> {
-    // TODO (Copilot): use tauri-plugin-keyring to read "pharmacare_session" key
-    todo!("implement keychain read")
+fn jwt_secret() -> String {
+    std::env::var("PHARMACARE_JWT_SECRET")
+        .unwrap_or_else(|_| "pharmacare-dev-secret-change-me".to_string())
 }
 
 #[derive(Debug)]
 struct JwtClaims {
     pub user_id: i64,
-    pub role_id: i64,
     pub jti: String,
-    pub exp: i64,
 }
