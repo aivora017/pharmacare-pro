@@ -2,6 +2,7 @@ use crate::commands::auth::UserDto;
 use crate::commands::billing::CreateBillInput;
 use crate::commands::customer::DoctorCreateInput;
 use crate::commands::medicine::{BatchDto, CategoryDto, MedicineDetailDto, MedicineDto};
+use crate::commands::purchase::PurchaseBillCreateInput;
 use crate::commands::purchase::SupplierInput;
 use crate::error::AppError;
 use bcrypt::{hash, DEFAULT_COST};
@@ -1370,6 +1371,180 @@ impl Database {
             items.push(row.map_err(|e| AppError::Internal(e.to_string()))?);
         }
         Ok(serde_json::Value::Array(items))
+    }
+
+    pub fn purchase_create_bill(&self, data: &PurchaseBillCreateInput, user_id: i64) -> Result<i64, AppError> {
+        let bill_number = data.bill_number.trim();
+        if bill_number.is_empty() {
+            return Err(AppError::Validation("Purchase bill number is required.".to_string()));
+        }
+        if data.total_amount <= 0.0 {
+            return Err(AppError::Validation("Total amount must be greater than zero.".to_string()));
+        }
+
+        let amount_paid = data.amount_paid.unwrap_or(0.0);
+        if amount_paid < 0.0 {
+            return Err(AppError::Validation("Amount paid cannot be negative.".to_string()));
+        }
+
+        let payment_status = if amount_paid <= 0.0 {
+            "unpaid"
+        } else if amount_paid + f64::EPSILON < data.total_amount {
+            "partial"
+        } else {
+            "paid"
+        };
+
+        let conn = self.connection()?;
+
+        let supplier_active: i64 = conn
+            .query_row(
+                "SELECT is_active FROM suppliers WHERE id = ?1 AND deleted_at IS NULL",
+                params![data.supplier_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|e| AppError::Internal(e.to_string()))?
+            .ok_or_else(|| AppError::Validation("Supplier not found.".to_string()))?;
+
+        if supplier_active != 1 {
+            return Err(AppError::Validation("Supplier is inactive.".to_string()));
+        }
+
+        conn.execute(
+            "INSERT INTO purchase_bills (
+                bill_number, supplier_id, bill_date, due_date,
+                subtotal, taxable_amount, total_amount,
+                amount_paid, payment_status, source, notes, created_by
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?5, ?5, ?6, ?7, 'manual', ?8, ?9)",
+            params![
+                bill_number,
+                data.supplier_id,
+                data.bill_date,
+                data.due_date,
+                data.total_amount,
+                amount_paid,
+                payment_status,
+                data.notes.as_ref().map(|v| v.trim()).filter(|v| !v.is_empty()),
+                user_id,
+            ],
+        )
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let bill_id = conn.last_insert_rowid();
+
+        conn.execute(
+            "UPDATE suppliers
+             SET outstanding_balance = outstanding_balance + (?1 - ?2),
+                 updated_at = ?3
+             WHERE id = ?4",
+            params![data.total_amount, amount_paid, chrono::Utc::now().to_rfc3339(), data.supplier_id],
+        )
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        self.write_audit_log(
+            "PURCHASE_BILL_CREATED",
+            "purchase",
+            &bill_id.to_string(),
+            None,
+            Some(
+                &serde_json::json!({
+                    "bill_number": bill_number,
+                    "supplier_id": data.supplier_id,
+                    "total_amount": data.total_amount,
+                    "amount_paid": amount_paid,
+                })
+                .to_string(),
+            ),
+            &format!("user:{}", user_id),
+        )?;
+
+        Ok(bill_id)
+    }
+
+    pub fn purchase_get_bill(&self, id: i64) -> Result<serde_json::Value, AppError> {
+        let conn = self.connection()?;
+
+        conn.query_row(
+            "SELECT
+                pb.id, pb.bill_number, pb.supplier_id, s.name,
+                pb.bill_date, pb.due_date, pb.total_amount,
+                pb.amount_paid, pb.payment_status, pb.source, pb.created_at
+             FROM purchase_bills pb
+             JOIN suppliers s ON s.id = pb.supplier_id
+             WHERE pb.id = ?1",
+            params![id],
+            |row| {
+                Ok(serde_json::json!({
+                    "id": row.get::<_, i64>(0)?,
+                    "bill_number": row.get::<_, String>(1)?,
+                    "supplier_id": row.get::<_, i64>(2)?,
+                    "supplier_name": row.get::<_, String>(3)?,
+                    "bill_date": row.get::<_, String>(4)?,
+                    "due_date": row.get::<_, Option<String>>(5)?,
+                    "total_amount": row.get::<_, f64>(6)?,
+                    "amount_paid": row.get::<_, f64>(7)?,
+                    "payment_status": row.get::<_, String>(8)?,
+                    "source": row.get::<_, String>(9)?,
+                    "created_at": row.get::<_, String>(10)?,
+                    "items": serde_json::json!([]),
+                }))
+            },
+        )
+        .optional()
+        .map_err(|e| AppError::Internal(e.to_string()))?
+        .ok_or_else(|| AppError::Validation("Purchase bill not found.".to_string()))
+    }
+
+    pub fn purchase_list_bills(&self, filters: &serde_json::Value) -> Result<serde_json::Value, AppError> {
+        let conn = self.connection()?;
+
+        let supplier_id = filters.get("supplier_id").and_then(|v| v.as_i64());
+        let payment_status = filters.get("payment_status").and_then(|v| v.as_str()).unwrap_or("");
+
+        let mut stmt = conn
+            .prepare(
+                "SELECT
+                    pb.id, pb.bill_number, pb.supplier_id, s.name,
+                    pb.bill_date, pb.due_date, pb.total_amount,
+                    pb.amount_paid, pb.payment_status, pb.source, pb.created_at
+                 FROM purchase_bills pb
+                 JOIN suppliers s ON s.id = pb.supplier_id
+                 WHERE (?1 IS NULL OR pb.supplier_id = ?1)
+                   AND (?2 = '' OR pb.payment_status = ?2)
+                 ORDER BY pb.bill_date DESC, pb.id DESC
+                 LIMIT 200",
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let rows = stmt
+            .query_map(params![supplier_id, payment_status], |row| {
+                Ok(serde_json::json!({
+                    "id": row.get::<_, i64>(0)?,
+                    "bill_number": row.get::<_, String>(1)?,
+                    "supplier_id": row.get::<_, i64>(2)?,
+                    "supplier_name": row.get::<_, String>(3)?,
+                    "bill_date": row.get::<_, String>(4)?,
+                    "due_date": row.get::<_, Option<String>>(5)?,
+                    "total_amount": row.get::<_, f64>(6)?,
+                    "amount_paid": row.get::<_, f64>(7)?,
+                    "payment_status": row.get::<_, String>(8)?,
+                    "source": row.get::<_, String>(9)?,
+                    "created_at": row.get::<_, String>(10)?,
+                }))
+            })
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let mut items = Vec::new();
+        for row in rows {
+            items.push(row.map_err(|e| AppError::Internal(e.to_string()))?);
+        }
+
+        let total = items.len();
+        Ok(serde_json::json!({
+            "bills": items,
+            "total": total,
+        }))
     }
 
     pub fn purchase_create_supplier(&self, data: &SupplierInput, user_id: i64) -> Result<i64, AppError> {

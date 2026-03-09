@@ -8,6 +8,7 @@ import AuthPage from '@/pages/Auth'
 import DashboardPage from '@/pages/Dashboard'
 import BillingPage from '@/pages/Billing'
 import MedicinePage from '@/pages/Medicine'
+import PurchasePage from '@/pages/Purchase'
 import CustomersPage from '@/pages/Customers'
 import DoctorsPage from '@/pages/Doctors'
 import SuppliersPage from '@/pages/Suppliers'
@@ -47,12 +48,7 @@ function ProtectedLayout() {
             <Route path="/medicine" element={<MedicinePage />} />
             <Route
               path="/purchase"
-              element={
-                <ModulePlaceholderPage
-                  title="Purchase"
-                  description="Supplier and purchase entry flow will be built in the next phase."
-                />
-              }
+              element={<PurchasePage />}
             />
             <Route
               path="/customers"

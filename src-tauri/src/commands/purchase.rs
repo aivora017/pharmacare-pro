@@ -19,6 +19,17 @@ use serde::Deserialize;
 use tauri::State;
 
 #[derive(Debug, Deserialize)]
+pub struct PurchaseBillCreateInput {
+	pub bill_number: String,
+	pub supplier_id: i64,
+	pub bill_date: String,
+	pub due_date: Option<String>,
+	pub total_amount: f64,
+	pub amount_paid: Option<f64>,
+	pub notes: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct SupplierInput {
 	pub name: String,
 	pub contact_person: Option<String>,
@@ -34,11 +45,27 @@ pub struct SupplierInput {
 }
 
 #[tauri::command]
-pub async fn purchase_create_bill(state: State<'_, AppState>, data: serde_json::Value, user_id: i64) -> Result<i64, AppError> { todo!("purchase_create_bill") }
+pub async fn purchase_create_bill(
+	state: State<'_, AppState>,
+	data: PurchaseBillCreateInput,
+	user_id: i64,
+) -> Result<i64, AppError> {
+	let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+	db.purchase_create_bill(&data, user_id)
+}
 #[tauri::command]
-pub async fn purchase_get_bill(state: State<'_, AppState>, id: i64) -> Result<serde_json::Value, AppError> { todo!("purchase_get_bill") }
+pub async fn purchase_get_bill(state: State<'_, AppState>, id: i64) -> Result<serde_json::Value, AppError> {
+	let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+	db.purchase_get_bill(id)
+}
 #[tauri::command]
-pub async fn purchase_list_bills(state: State<'_, AppState>, filters: serde_json::Value) -> Result<serde_json::Value, AppError> { todo!("purchase_list_bills") }
+pub async fn purchase_list_bills(
+	state: State<'_, AppState>,
+	filters: serde_json::Value,
+) -> Result<serde_json::Value, AppError> {
+	let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+	db.purchase_list_bills(&filters)
+}
 #[tauri::command]
 pub async fn purchase_create_po(state: State<'_, AppState>, data: serde_json::Value, user_id: i64) -> Result<i64, AppError> { todo!("purchase_create_po") }
 #[tauri::command]

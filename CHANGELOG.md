@@ -12,3 +12,5 @@ The format is based on Keep a Changelog.
 - Customer and doctor backend commands for get/update/history and doctor CRUD.
 - Functional Doctors and Customers pages with search, create, edit, and detail/history views.
 - Supplier backend commands and Suppliers page with list, create, and update flows.
+- Manual purchase bill backend commands (create/get/list) with supplier outstanding update and audit logging.
+- Functional Purchase page with supplier/payment filters and bill entry form.

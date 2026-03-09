@@ -75,7 +75,7 @@
 ## PHASE 4 — Purchase & Suppliers (Weeks 7–9)
 
 - [x] Supplier list + add/edit form
-- [ ] Manual purchase bill entry (all fields from IPurchaseBill)
+- [x] Manual purchase bill entry (all fields from IPurchaseBill)
 - [ ] Email IMAP configuration (Settings → Email)
 - [ ] Email polling service (background, every 20 mins)
 - [ ] CSV/Excel parser for distributor bills
