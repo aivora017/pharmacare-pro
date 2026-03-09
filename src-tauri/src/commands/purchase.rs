@@ -15,7 +15,23 @@
 //! 6. On confirm: call purchase_create_bill with source="email_import"
 
 use crate::{AppState, error::AppError};
+use serde::Deserialize;
 use tauri::State;
+
+#[derive(Debug, Deserialize)]
+pub struct SupplierInput {
+	pub name: String,
+	pub contact_person: Option<String>,
+	pub phone: Option<String>,
+	pub email: Option<String>,
+	pub email_domain: Option<String>,
+	pub gstin: Option<String>,
+	pub drug_licence_no: Option<String>,
+	pub drug_licence_expiry: Option<String>,
+	pub payment_terms: Option<i64>,
+	pub credit_limit: Option<f64>,
+	pub reliability_score: Option<f64>,
+}
 
 #[tauri::command]
 pub async fn purchase_create_bill(state: State<'_, AppState>, data: serde_json::Value, user_id: i64) -> Result<i64, AppError> { todo!("purchase_create_bill") }
@@ -26,9 +42,27 @@ pub async fn purchase_list_bills(state: State<'_, AppState>, filters: serde_json
 #[tauri::command]
 pub async fn purchase_create_po(state: State<'_, AppState>, data: serde_json::Value, user_id: i64) -> Result<i64, AppError> { todo!("purchase_create_po") }
 #[tauri::command]
-pub async fn purchase_create_supplier(state: State<'_, AppState>, data: serde_json::Value, user_id: i64) -> Result<i64, AppError> { todo!("purchase_create_supplier") }
+pub async fn purchase_create_supplier(
+	state: State<'_, AppState>,
+	data: SupplierInput,
+	user_id: i64,
+) -> Result<i64, AppError> {
+	let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+	db.purchase_create_supplier(&data, user_id)
+}
 #[tauri::command]
-pub async fn purchase_list_suppliers(state: State<'_, AppState>) -> Result<serde_json::Value, AppError> { todo!("purchase_list_suppliers") }
+pub async fn purchase_list_suppliers(state: State<'_, AppState>) -> Result<serde_json::Value, AppError> {
+	let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+	db.purchase_list_suppliers()
+}
 #[tauri::command]
-pub async fn purchase_update_supplier(state: State<'_, AppState>, id: i64, data: serde_json::Value, user_id: i64) -> Result<(), AppError> { todo!("purchase_update_supplier") }
+pub async fn purchase_update_supplier(
+	state: State<'_, AppState>,
+	id: i64,
+	data: serde_json::Value,
+	user_id: i64,
+) -> Result<(), AppError> {
+	let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+	db.purchase_update_supplier(id, &data, user_id)
+}
 

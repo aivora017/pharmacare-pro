@@ -22,7 +22,7 @@ mod security;
 mod background;
 mod error;
 
-use commands::{auth, billing, customer, medicine, printer, settings};
+use commands::{auth, billing, customer, medicine, printer, purchase, settings};
 use db::Database;
 use std::sync::Mutex;
 use tauri::Manager;
@@ -99,7 +99,18 @@ fn main() {
 
             // Customers
             customer::customer_search,
+            customer::customer_get,
             customer::customer_create,
+            customer::customer_update,
+            customer::customer_get_history,
+            customer::doctor_list,
+            customer::doctor_create,
+            customer::doctor_update,
+
+            // Purchase & Suppliers
+            purchase::purchase_list_suppliers,
+            purchase::purchase_create_supplier,
+            purchase::purchase_update_supplier,
 
             // Printing
             printer::printer_list_printers,

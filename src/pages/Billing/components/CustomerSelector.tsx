@@ -82,7 +82,8 @@ export function CustomerSelector({ onSelect, onClose, userId }: Props) {
                   <div>
                     <p className="text-sm font-medium text-slate-800">{row.name}</p>
                     <p className="text-xs text-slate-500">
-                      {row.phone || 'No phone'} | Outstanding: Rs {row.outstanding_balance.toFixed(2)}
+                      {row.phone || 'No phone'} | Outstanding: Rs{' '}
+                      {row.outstanding_balance.toFixed(2)}
                     </p>
                     <p className="text-xs text-slate-500">Loyalty: {row.loyalty_points} pts</p>
                   </div>

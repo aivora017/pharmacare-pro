@@ -74,7 +74,7 @@
 
 ## PHASE 4 — Purchase & Suppliers (Weeks 7–9)
 
-- [ ] Supplier list + add/edit form
+- [x] Supplier list + add/edit form
 - [ ] Manual purchase bill entry (all fields from IPurchaseBill)
 - [ ] Email IMAP configuration (Settings → Email)
 - [ ] Email polling service (background, every 20 mins)
@@ -87,12 +87,12 @@
 
 ## PHASE 5 — Customers & Doctors (Weeks 10–11)
 
-- [ ] Customer list with search (by name, phone)
+- [x] Customer list with search (by name, phone)
 - [ ] Add/edit customer form (all fields from ICustomer)
-- [ ] Customer detail page: purchase history timeline
+- [x] Customer detail page: purchase history timeline
 - [ ] Outstanding balance display and credit payment
 - [ ] Loyalty points display and redemption at POS
-- [ ] Doctor list + add/edit form
+- [x] Doctor list + add/edit form
 - [ ] Prescription upload (image/PDF attachment to bill)
 - [ ] Allergy/condition recording and warnings at POS
 

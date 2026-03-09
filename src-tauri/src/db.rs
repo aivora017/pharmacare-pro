@@ -1,6 +1,8 @@
 use crate::commands::auth::UserDto;
 use crate::commands::billing::CreateBillInput;
+use crate::commands::customer::DoctorCreateInput;
 use crate::commands::medicine::{BatchDto, CategoryDto, MedicineDetailDto, MedicineDto};
+use crate::commands::purchase::SupplierInput;
 use crate::error::AppError;
 use bcrypt::{hash, DEFAULT_COST};
 use rusqlite::{params, Connection, OptionalExtension};
@@ -925,6 +927,652 @@ impl Database {
         )?;
 
         Ok(customer_id)
+    }
+
+    pub fn customer_get(&self, id: i64) -> Result<serde_json::Value, AppError> {
+        let conn = self.connection()?;
+
+        conn.query_row(
+            "SELECT
+                c.id, c.name, c.phone, c.phone2, c.email,
+                c.date_of_birth, c.gender, c.blood_group,
+                c.address, c.pincode, c.doctor_id,
+                d.name,
+                c.allergies, c.chronic_conditions,
+                c.outstanding_balance, c.loyalty_points,
+                c.med_sync_date, c.notes, c.is_active,
+                c.created_at, c.updated_at
+             FROM customers c
+             LEFT JOIN doctors d ON d.id = c.doctor_id
+             WHERE c.id = ?1",
+            params![id],
+            |row| {
+                let allergies_raw = row.get::<_, Option<String>>(12)?.unwrap_or_else(|| "[]".to_string());
+                let chronic_raw = row.get::<_, Option<String>>(13)?.unwrap_or_else(|| "[]".to_string());
+
+                let allergies = serde_json::from_str::<serde_json::Value>(&allergies_raw)
+                    .unwrap_or_else(|_| serde_json::json!([]));
+                let chronic_conditions = serde_json::from_str::<serde_json::Value>(&chronic_raw)
+                    .unwrap_or_else(|_| serde_json::json!([]));
+
+                Ok(serde_json::json!({
+                    "id": row.get::<_, i64>(0)?,
+                    "name": row.get::<_, String>(1)?,
+                    "phone": row.get::<_, Option<String>>(2)?,
+                    "phone2": row.get::<_, Option<String>>(3)?,
+                    "email": row.get::<_, Option<String>>(4)?,
+                    "date_of_birth": row.get::<_, Option<String>>(5)?,
+                    "gender": row.get::<_, Option<String>>(6)?,
+                    "blood_group": row.get::<_, Option<String>>(7)?,
+                    "address": row.get::<_, Option<String>>(8)?,
+                    "pincode": row.get::<_, Option<String>>(9)?,
+                    "doctor_id": row.get::<_, Option<i64>>(10)?,
+                    "doctor_name": row.get::<_, Option<String>>(11)?,
+                    "allergies": allergies,
+                    "chronic_conditions": chronic_conditions,
+                    "outstanding_balance": row.get::<_, f64>(14)?,
+                    "loyalty_points": row.get::<_, i64>(15)?,
+                    "med_sync_date": row.get::<_, Option<i64>>(16)?,
+                    "notes": row.get::<_, Option<String>>(17)?,
+                    "is_active": row.get::<_, i64>(18)? == 1,
+                    "created_at": row.get::<_, String>(19)?,
+                    "updated_at": row.get::<_, String>(20)?,
+                }))
+            },
+        )
+        .optional()
+        .map_err(|e| AppError::Internal(e.to_string()))?
+        .ok_or_else(|| AppError::Validation("Customer not found.".to_string()))
+    }
+
+    pub fn customer_update(&self, id: i64, data: &serde_json::Value, user_id: i64) -> Result<(), AppError> {
+        let current = self.customer_get(id)?;
+
+        let current_name = current.get("name").and_then(|v| v.as_str()).unwrap_or("");
+        let name = data
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or(current_name)
+            .trim()
+            .to_string();
+
+        if name.is_empty() {
+            return Err(AppError::Validation("Customer name is required.".to_string()));
+        }
+
+        let pick_string = |key: &str| -> Option<String> {
+            if let Some(value) = data.get(key) {
+                return value
+                    .as_str()
+                    .map(|text| text.trim().to_string())
+                    .filter(|text| !text.is_empty());
+            }
+
+            current
+                .get(key)
+                .and_then(|v| v.as_str())
+                .map(|text| text.trim().to_string())
+                .filter(|text| !text.is_empty())
+        };
+
+        let pick_i64 = |key: &str| -> Option<i64> {
+            if let Some(value) = data.get(key) {
+                return value.as_i64();
+            }
+            current.get(key).and_then(|v| v.as_i64())
+        };
+
+        let pick_f64 = |key: &str| -> f64 {
+            if let Some(value) = data.get(key) {
+                return value.as_f64().unwrap_or(0.0);
+            }
+            current.get(key).and_then(|v| v.as_f64()).unwrap_or(0.0)
+        };
+
+        let pick_bool = |key: &str| -> bool {
+            if let Some(value) = data.get(key) {
+                return value.as_bool().unwrap_or(false);
+            }
+            current.get(key).and_then(|v| v.as_bool()).unwrap_or(false)
+        };
+
+        let allergies = data
+            .get("allergies")
+            .cloned()
+            .or_else(|| current.get("allergies").cloned())
+            .unwrap_or_else(|| serde_json::json!([]));
+
+        let chronic_conditions = data
+            .get("chronic_conditions")
+            .cloned()
+            .or_else(|| current.get("chronic_conditions").cloned())
+            .unwrap_or_else(|| serde_json::json!([]));
+
+        let conn = self.connection()?;
+        let changed = conn
+            .execute(
+                "UPDATE customers
+                 SET name = ?1,
+                     phone = ?2,
+                     phone2 = ?3,
+                     email = ?4,
+                     date_of_birth = ?5,
+                     gender = ?6,
+                     blood_group = ?7,
+                     address = ?8,
+                     pincode = ?9,
+                     doctor_id = ?10,
+                     allergies = ?11,
+                     chronic_conditions = ?12,
+                     outstanding_balance = ?13,
+                     loyalty_points = ?14,
+                     med_sync_date = ?15,
+                     notes = ?16,
+                     is_active = ?17,
+                     updated_at = ?18
+                 WHERE id = ?19",
+                params![
+                    name,
+                    pick_string("phone"),
+                    pick_string("phone2"),
+                    pick_string("email"),
+                    pick_string("date_of_birth"),
+                    pick_string("gender"),
+                    pick_string("blood_group"),
+                    pick_string("address"),
+                    pick_string("pincode"),
+                    pick_i64("doctor_id"),
+                    allergies.to_string(),
+                    chronic_conditions.to_string(),
+                    pick_f64("outstanding_balance"),
+                    pick_i64("loyalty_points").unwrap_or(0),
+                    pick_i64("med_sync_date"),
+                    pick_string("notes"),
+                    if pick_bool("is_active") { 1 } else { 0 },
+                    chrono::Utc::now().to_rfc3339(),
+                    id,
+                ],
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        if changed == 0 {
+            return Err(AppError::Validation("Customer not found.".to_string()));
+        }
+
+        self.write_audit_log(
+            "CUSTOMER_UPDATED",
+            "customer",
+            &id.to_string(),
+            Some(&current.to_string()),
+            Some(&data.to_string()),
+            &format!("user:{}", user_id),
+        )?;
+
+        Ok(())
+    }
+
+    pub fn customer_get_history(&self, customer_id: i64, limit: i64) -> Result<serde_json::Value, AppError> {
+        let conn = self.connection()?;
+        let safe_limit = if limit < 1 { 1 } else if limit > 500 { 500 } else { limit };
+
+        let mut stmt = conn
+            .prepare(
+                "SELECT
+                    b.id, b.bill_number, b.bill_date, b.status,
+                    b.net_amount, b.outstanding,
+                    COUNT(bi.id) AS item_count
+                 FROM bills b
+                 LEFT JOIN bill_items bi ON bi.bill_id = b.id
+                 WHERE b.customer_id = ?1
+                 GROUP BY b.id, b.bill_number, b.bill_date, b.status, b.net_amount, b.outstanding
+                 ORDER BY b.bill_date DESC
+                 LIMIT ?2",
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let rows = stmt
+            .query_map(params![customer_id, safe_limit], |row| {
+                Ok(serde_json::json!({
+                    "id": row.get::<_, i64>(0)?,
+                    "bill_number": row.get::<_, String>(1)?,
+                    "bill_date": row.get::<_, String>(2)?,
+                    "status": row.get::<_, String>(3)?,
+                    "net_amount": row.get::<_, f64>(4)?,
+                    "outstanding": row.get::<_, f64>(5)?,
+                    "item_count": row.get::<_, i64>(6)?,
+                }))
+            })
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let mut history = Vec::new();
+        for row in rows {
+            history.push(row.map_err(|e| AppError::Internal(e.to_string()))?);
+        }
+
+        Ok(serde_json::Value::Array(history))
+    }
+
+    pub fn doctor_list(&self) -> Result<serde_json::Value, AppError> {
+        let conn = self.connection()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, name, registration_no, specialisation, qualification, clinic_name, phone, email, is_active, created_at
+                 FROM doctors
+                 WHERE is_active = 1
+                 ORDER BY name ASC",
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(serde_json::json!({
+                    "id": row.get::<_, i64>(0)?,
+                    "name": row.get::<_, String>(1)?,
+                    "registration_no": row.get::<_, Option<String>>(2)?,
+                    "specialisation": row.get::<_, Option<String>>(3)?,
+                    "qualification": row.get::<_, Option<String>>(4)?,
+                    "clinic_name": row.get::<_, Option<String>>(5)?,
+                    "phone": row.get::<_, Option<String>>(6)?,
+                    "email": row.get::<_, Option<String>>(7)?,
+                    "is_active": row.get::<_, i64>(8)? == 1,
+                    "created_at": row.get::<_, String>(9)?,
+                }))
+            })
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let mut items = Vec::new();
+        for row in rows {
+            items.push(row.map_err(|e| AppError::Internal(e.to_string()))?);
+        }
+        Ok(serde_json::Value::Array(items))
+    }
+
+    pub fn doctor_create(&self, data: &DoctorCreateInput, user_id: i64) -> Result<i64, AppError> {
+        let name = data.name.trim();
+        if name.is_empty() {
+            return Err(AppError::Validation("Doctor name is required.".to_string()));
+        }
+
+        let conn = self.connection()?;
+        conn.execute(
+            "INSERT INTO doctors (name, registration_no, specialisation, qualification, clinic_name, phone, email, address, notes)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                name,
+                data.registration_no.as_ref().map(|v| v.trim()).filter(|v| !v.is_empty()),
+                data.specialisation.as_ref().map(|v| v.trim()).filter(|v| !v.is_empty()),
+                data.qualification.as_ref().map(|v| v.trim()).filter(|v| !v.is_empty()),
+                data.clinic_name.as_ref().map(|v| v.trim()).filter(|v| !v.is_empty()),
+                data.phone.as_ref().map(|v| v.trim()).filter(|v| !v.is_empty()),
+                data.email.as_ref().map(|v| v.trim()).filter(|v| !v.is_empty()),
+                data.address.as_ref().map(|v| v.trim()).filter(|v| !v.is_empty()),
+                data.notes.as_ref().map(|v| v.trim()).filter(|v| !v.is_empty()),
+            ],
+        )
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let doctor_id = conn.last_insert_rowid();
+        self.write_audit_log(
+            "DOCTOR_CREATED",
+            "doctor",
+            &doctor_id.to_string(),
+            None,
+            Some(&serde_json::json!({
+                "name": name,
+                "registration_no": data.registration_no,
+            }).to_string()),
+            &format!("user:{}", user_id),
+        )?;
+
+        Ok(doctor_id)
+    }
+
+    pub fn doctor_update(&self, id: i64, data: &serde_json::Value, user_id: i64) -> Result<(), AppError> {
+        let conn = self.connection()?;
+
+        let current = conn.query_row(
+            "SELECT id, name, registration_no, specialisation, qualification, clinic_name, phone, email, address, notes, is_active
+             FROM doctors WHERE id = ?1",
+            params![id],
+            |row| {
+                Ok(serde_json::json!({
+                    "id": row.get::<_, i64>(0)?,
+                    "name": row.get::<_, String>(1)?,
+                    "registration_no": row.get::<_, Option<String>>(2)?,
+                    "specialisation": row.get::<_, Option<String>>(3)?,
+                    "qualification": row.get::<_, Option<String>>(4)?,
+                    "clinic_name": row.get::<_, Option<String>>(5)?,
+                    "phone": row.get::<_, Option<String>>(6)?,
+                    "email": row.get::<_, Option<String>>(7)?,
+                    "address": row.get::<_, Option<String>>(8)?,
+                    "notes": row.get::<_, Option<String>>(9)?,
+                    "is_active": row.get::<_, i64>(10)? == 1,
+                }))
+            },
+        )
+        .optional()
+        .map_err(|e| AppError::Internal(e.to_string()))?
+        .ok_or_else(|| AppError::Validation("Doctor not found.".to_string()))?;
+
+        let pick_string = |key: &str| -> Option<String> {
+            if let Some(value) = data.get(key) {
+                return value
+                    .as_str()
+                    .map(|text| text.trim().to_string())
+                    .filter(|text| !text.is_empty());
+            }
+
+            current
+                .get(key)
+                .and_then(|v| v.as_str())
+                .map(|text| text.trim().to_string())
+                .filter(|text| !text.is_empty())
+        };
+
+        let name = pick_string("name").unwrap_or_default();
+        if name.is_empty() {
+            return Err(AppError::Validation("Doctor name is required.".to_string()));
+        }
+
+        let is_active = data
+            .get("is_active")
+            .and_then(|v| v.as_bool())
+            .or_else(|| current.get("is_active").and_then(|v| v.as_bool()))
+            .unwrap_or(true);
+
+        let changed = conn
+            .execute(
+                "UPDATE doctors
+                 SET name = ?1,
+                     registration_no = ?2,
+                     specialisation = ?3,
+                     qualification = ?4,
+                     clinic_name = ?5,
+                     phone = ?6,
+                     email = ?7,
+                     address = ?8,
+                     notes = ?9,
+                     is_active = ?10,
+                     updated_at = ?11
+                 WHERE id = ?12",
+                params![
+                    name,
+                    pick_string("registration_no"),
+                    pick_string("specialisation"),
+                    pick_string("qualification"),
+                    pick_string("clinic_name"),
+                    pick_string("phone"),
+                    pick_string("email"),
+                    pick_string("address"),
+                    pick_string("notes"),
+                    if is_active { 1 } else { 0 },
+                    chrono::Utc::now().to_rfc3339(),
+                    id,
+                ],
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        if changed == 0 {
+            return Err(AppError::Validation("Doctor not found.".to_string()));
+        }
+
+        self.write_audit_log(
+            "DOCTOR_UPDATED",
+            "doctor",
+            &id.to_string(),
+            Some(&current.to_string()),
+            Some(&data.to_string()),
+            &format!("user:{}", user_id),
+        )?;
+
+        Ok(())
+    }
+
+    pub fn purchase_list_suppliers(&self) -> Result<serde_json::Value, AppError> {
+        let conn = self.connection()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT
+                    id, name, contact_person, phone, email,
+                    email_domain, gstin, drug_licence_no, drug_licence_expiry,
+                    payment_terms, credit_limit, outstanding_balance, reliability_score,
+                    is_active, created_at
+                 FROM suppliers
+                 WHERE deleted_at IS NULL
+                 ORDER BY name ASC",
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(serde_json::json!({
+                    "id": row.get::<_, i64>(0)?,
+                    "name": row.get::<_, String>(1)?,
+                    "contact_person": row.get::<_, Option<String>>(2)?,
+                    "phone": row.get::<_, Option<String>>(3)?,
+                    "email": row.get::<_, Option<String>>(4)?,
+                    "email_domain": row.get::<_, Option<String>>(5)?,
+                    "gstin": row.get::<_, Option<String>>(6)?,
+                    "drug_licence_no": row.get::<_, Option<String>>(7)?,
+                    "drug_licence_expiry": row.get::<_, Option<String>>(8)?,
+                    "payment_terms": row.get::<_, i64>(9)?,
+                    "credit_limit": row.get::<_, f64>(10)?,
+                    "outstanding_balance": row.get::<_, f64>(11)?,
+                    "reliability_score": row.get::<_, f64>(12)?,
+                    "is_active": row.get::<_, i64>(13)? == 1,
+                    "created_at": row.get::<_, String>(14)?,
+                }))
+            })
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let mut items = Vec::new();
+        for row in rows {
+            items.push(row.map_err(|e| AppError::Internal(e.to_string()))?);
+        }
+        Ok(serde_json::Value::Array(items))
+    }
+
+    pub fn purchase_create_supplier(&self, data: &SupplierInput, user_id: i64) -> Result<i64, AppError> {
+        let name = data.name.trim();
+        if name.is_empty() {
+            return Err(AppError::Validation("Supplier name is required.".to_string()));
+        }
+
+        let payment_terms = data.payment_terms.unwrap_or(30);
+        if payment_terms < 0 {
+            return Err(AppError::Validation("Payment terms cannot be negative.".to_string()));
+        }
+
+        let credit_limit = data.credit_limit.unwrap_or(0.0);
+        if credit_limit < 0.0 {
+            return Err(AppError::Validation("Credit limit cannot be negative.".to_string()));
+        }
+
+        let reliability_score = data.reliability_score.unwrap_or(50.0).clamp(0.0, 100.0);
+        let conn = self.connection()?;
+
+        conn.execute(
+            "INSERT INTO suppliers (
+                name, contact_person, phone, email, email_domain,
+                gstin, drug_licence_no, drug_licence_expiry,
+                payment_terms, credit_limit, reliability_score
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            params![
+                name,
+                data.contact_person.as_ref().map(|v| v.trim()).filter(|v| !v.is_empty()),
+                data.phone.as_ref().map(|v| v.trim()).filter(|v| !v.is_empty()),
+                data.email.as_ref().map(|v| v.trim()).filter(|v| !v.is_empty()),
+                data.email_domain.as_ref().map(|v| v.trim().to_lowercase()).filter(|v| !v.is_empty()),
+                data.gstin.as_ref().map(|v| v.trim()).filter(|v| !v.is_empty()),
+                data.drug_licence_no.as_ref().map(|v| v.trim()).filter(|v| !v.is_empty()),
+                data.drug_licence_expiry.as_ref().map(|v| v.trim()).filter(|v| !v.is_empty()),
+                payment_terms,
+                credit_limit,
+                reliability_score,
+            ],
+        )
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let supplier_id = conn.last_insert_rowid();
+        self.write_audit_log(
+            "SUPPLIER_CREATED",
+            "supplier",
+            &supplier_id.to_string(),
+            None,
+            Some(
+                &serde_json::json!({
+                    "name": name,
+                    "phone": data.phone,
+                    "email": data.email,
+                })
+                .to_string(),
+            ),
+            &format!("user:{}", user_id),
+        )?;
+
+        Ok(supplier_id)
+    }
+
+    pub fn purchase_update_supplier(
+        &self,
+        id: i64,
+        data: &serde_json::Value,
+        user_id: i64,
+    ) -> Result<(), AppError> {
+        let conn = self.connection()?;
+
+        let current = conn
+            .query_row(
+                "SELECT
+                    id, name, contact_person, phone, email,
+                    email_domain, gstin, drug_licence_no, drug_licence_expiry,
+                    payment_terms, credit_limit, reliability_score, is_active
+                 FROM suppliers
+                 WHERE id = ?1 AND deleted_at IS NULL",
+                params![id],
+                |row| {
+                    Ok(serde_json::json!({
+                        "id": row.get::<_, i64>(0)?,
+                        "name": row.get::<_, String>(1)?,
+                        "contact_person": row.get::<_, Option<String>>(2)?,
+                        "phone": row.get::<_, Option<String>>(3)?,
+                        "email": row.get::<_, Option<String>>(4)?,
+                        "email_domain": row.get::<_, Option<String>>(5)?,
+                        "gstin": row.get::<_, Option<String>>(6)?,
+                        "drug_licence_no": row.get::<_, Option<String>>(7)?,
+                        "drug_licence_expiry": row.get::<_, Option<String>>(8)?,
+                        "payment_terms": row.get::<_, i64>(9)?,
+                        "credit_limit": row.get::<_, f64>(10)?,
+                        "reliability_score": row.get::<_, f64>(11)?,
+                        "is_active": row.get::<_, i64>(12)? == 1,
+                    }))
+                },
+            )
+            .optional()
+            .map_err(|e| AppError::Internal(e.to_string()))?
+            .ok_or_else(|| AppError::Validation("Supplier not found.".to_string()))?;
+
+        let pick_string = |key: &str| -> Option<String> {
+            if let Some(value) = data.get(key) {
+                return value
+                    .as_str()
+                    .map(|text| text.trim().to_string())
+                    .filter(|text| !text.is_empty());
+            }
+
+            current
+                .get(key)
+                .and_then(|v| v.as_str())
+                .map(|text| text.trim().to_string())
+                .filter(|text| !text.is_empty())
+        };
+
+        let name = pick_string("name").unwrap_or_default();
+        if name.is_empty() {
+            return Err(AppError::Validation("Supplier name is required.".to_string()));
+        }
+
+        let payment_terms = data
+            .get("payment_terms")
+            .and_then(|v| v.as_i64())
+            .or_else(|| current.get("payment_terms").and_then(|v| v.as_i64()))
+            .unwrap_or(30);
+        if payment_terms < 0 {
+            return Err(AppError::Validation("Payment terms cannot be negative.".to_string()));
+        }
+
+        let credit_limit = data
+            .get("credit_limit")
+            .and_then(|v| v.as_f64())
+            .or_else(|| current.get("credit_limit").and_then(|v| v.as_f64()))
+            .unwrap_or(0.0);
+        if credit_limit < 0.0 {
+            return Err(AppError::Validation("Credit limit cannot be negative.".to_string()));
+        }
+
+        let reliability_score = data
+            .get("reliability_score")
+            .and_then(|v| v.as_f64())
+            .or_else(|| current.get("reliability_score").and_then(|v| v.as_f64()))
+            .unwrap_or(50.0)
+            .clamp(0.0, 100.0);
+
+        let is_active = data
+            .get("is_active")
+            .and_then(|v| v.as_bool())
+            .or_else(|| current.get("is_active").and_then(|v| v.as_bool()))
+            .unwrap_or(true);
+
+        let changed = conn
+            .execute(
+                "UPDATE suppliers
+                 SET name = ?1,
+                     contact_person = ?2,
+                     phone = ?3,
+                     email = ?4,
+                     email_domain = ?5,
+                     gstin = ?6,
+                     drug_licence_no = ?7,
+                     drug_licence_expiry = ?8,
+                     payment_terms = ?9,
+                     credit_limit = ?10,
+                     reliability_score = ?11,
+                     is_active = ?12,
+                     updated_at = ?13
+                 WHERE id = ?14",
+                params![
+                    name,
+                    pick_string("contact_person"),
+                    pick_string("phone"),
+                    pick_string("email"),
+                    pick_string("email_domain").map(|v| v.to_lowercase()),
+                    pick_string("gstin"),
+                    pick_string("drug_licence_no"),
+                    pick_string("drug_licence_expiry"),
+                    payment_terms,
+                    credit_limit,
+                    reliability_score,
+                    if is_active { 1 } else { 0 },
+                    chrono::Utc::now().to_rfc3339(),
+                    id,
+                ],
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        if changed == 0 {
+            return Err(AppError::Validation("Supplier not found.".to_string()));
+        }
+
+        self.write_audit_log(
+            "SUPPLIER_UPDATED",
+            "supplier",
+            &id.to_string(),
+            Some(&current.to_string()),
+            Some(&data.to_string()),
+            &format!("user:{}", user_id),
+        )?;
+
+        Ok(())
     }
 
     pub fn update_password(&self, user_id: i64, new_hash: &str) -> Result<(), AppError> {

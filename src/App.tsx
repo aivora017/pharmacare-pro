@@ -8,6 +8,9 @@ import AuthPage from '@/pages/Auth'
 import DashboardPage from '@/pages/Dashboard'
 import BillingPage from '@/pages/Billing'
 import MedicinePage from '@/pages/Medicine'
+import CustomersPage from '@/pages/Customers'
+import DoctorsPage from '@/pages/Doctors'
+import SuppliersPage from '@/pages/Suppliers'
 import { ModulePlaceholderPage } from '@/pages/ModulePlaceholder'
 
 void useNavigate
@@ -53,12 +56,15 @@ function ProtectedLayout() {
             />
             <Route
               path="/customers"
-              element={
-                <ModulePlaceholderPage
-                  title="Customers"
-                  description="Customer profiles and credit tracking are planned after billing core."
-                />
-              }
+              element={<CustomersPage />}
+            />
+            <Route
+              path="/doctors"
+              element={<DoctorsPage />}
+            />
+            <Route
+              path="/suppliers"
+              element={<SuppliersPage />}
             />
             <Route
               path="/reports"
