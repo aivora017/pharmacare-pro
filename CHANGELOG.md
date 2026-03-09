@@ -18,3 +18,4 @@ The format is based on Keep a Changelog.
 - Functional Purchase page with supplier/payment filters and bill entry form.
 - Customer credit payment command and UI action to reduce outstanding balances with audit logging.
 - Purchase order creation command and Purchase tab support for creating draft POs.
+- Expanded customer profile editing to include allergies, chronic conditions, and med-sync day.

@@ -88,7 +88,7 @@
 ## PHASE 5 — Customers & Doctors (Weeks 10–11)
 
 - [x] Customer list with search (by name, phone)
-- [ ] Add/edit customer form (all fields from ICustomer)
+- [x] Add/edit customer form (all fields from ICustomer)
 - [x] Customer detail page: purchase history timeline
 - [x] Outstanding balance display and credit payment
 - [ ] Loyalty points display and redemption at POS

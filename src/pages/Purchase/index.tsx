@@ -212,152 +212,152 @@ export default function PurchasePage() {
       </div>
 
       {activeTab === 'bills' ? (
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-        <div className="bg-white rounded-xl border border-slate-200 p-4 xl:col-span-1">
-          <h3 className="text-sm font-semibold text-slate-800 mb-3">Add Purchase Bill</h3>
-          <form className="space-y-2" onSubmit={handleCreate}>
-            <input
-              value={form.bill_number}
-              onChange={(e) => setForm((prev) => ({ ...prev, bill_number: e.target.value }))}
-              placeholder="Bill number"
-              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm min-h-touch"
-            />
-            <select
-              value={form.supplier_id ?? ''}
-              onChange={(e) =>
-                setForm((prev) => ({
-                  ...prev,
-                  supplier_id: e.target.value ? Number(e.target.value) : undefined,
-                }))
-              }
-              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm min-h-touch"
-            >
-              <option value="">Select supplier</option>
-              {suppliers.map((supplier) => (
-                <option key={supplier.id} value={supplier.id}>
-                  {supplier.name}
-                </option>
-              ))}
-            </select>
-            <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+          <div className="bg-white rounded-xl border border-slate-200 p-4 xl:col-span-1">
+            <h3 className="text-sm font-semibold text-slate-800 mb-3">Add Purchase Bill</h3>
+            <form className="space-y-2" onSubmit={handleCreate}>
               <input
-                value={form.bill_date}
-                onChange={(e) => setForm((prev) => ({ ...prev, bill_date: e.target.value }))}
-                type="date"
-                className="border border-slate-300 rounded-lg px-3 py-2 text-sm min-h-touch"
+                value={form.bill_number}
+                onChange={(e) => setForm((prev) => ({ ...prev, bill_number: e.target.value }))}
+                placeholder="Bill number"
+                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm min-h-touch"
               />
-              <input
-                value={form.due_date}
-                onChange={(e) => setForm((prev) => ({ ...prev, due_date: e.target.value }))}
-                type="date"
-                className="border border-slate-300 rounded-lg px-3 py-2 text-sm min-h-touch"
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <input
-                value={form.total_amount}
+              <select
+                value={form.supplier_id ?? ''}
                 onChange={(e) =>
-                  setForm((prev) => ({ ...prev, total_amount: Number(e.target.value) || 0 }))
+                  setForm((prev) => ({
+                    ...prev,
+                    supplier_id: e.target.value ? Number(e.target.value) : undefined,
+                  }))
                 }
-                type="number"
-                min={0}
-                step="0.01"
-                placeholder="Total amount"
-                className="border border-slate-300 rounded-lg px-3 py-2 text-sm min-h-touch"
+                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm min-h-touch"
+              >
+                <option value="">Select supplier</option>
+                {suppliers.map((supplier) => (
+                  <option key={supplier.id} value={supplier.id}>
+                    {supplier.name}
+                  </option>
+                ))}
+              </select>
+              <div className="grid grid-cols-2 gap-2">
+                <input
+                  value={form.bill_date}
+                  onChange={(e) => setForm((prev) => ({ ...prev, bill_date: e.target.value }))}
+                  type="date"
+                  className="border border-slate-300 rounded-lg px-3 py-2 text-sm min-h-touch"
+                />
+                <input
+                  value={form.due_date}
+                  onChange={(e) => setForm((prev) => ({ ...prev, due_date: e.target.value }))}
+                  type="date"
+                  className="border border-slate-300 rounded-lg px-3 py-2 text-sm min-h-touch"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <input
+                  value={form.total_amount}
+                  onChange={(e) =>
+                    setForm((prev) => ({ ...prev, total_amount: Number(e.target.value) || 0 }))
+                  }
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  placeholder="Total amount"
+                  className="border border-slate-300 rounded-lg px-3 py-2 text-sm min-h-touch"
+                />
+                <input
+                  value={form.amount_paid}
+                  onChange={(e) =>
+                    setForm((prev) => ({ ...prev, amount_paid: Number(e.target.value) || 0 }))
+                  }
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  placeholder="Amount paid"
+                  className="border border-slate-300 rounded-lg px-3 py-2 text-sm min-h-touch"
+                />
+              </div>
+              <textarea
+                value={form.notes}
+                onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))}
+                rows={3}
+                placeholder="Notes"
+                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
               />
-              <input
-                value={form.amount_paid}
-                onChange={(e) =>
-                  setForm((prev) => ({ ...prev, amount_paid: Number(e.target.value) || 0 }))
-                }
-                type="number"
-                min={0}
-                step="0.01"
-                placeholder="Amount paid"
-                className="border border-slate-300 rounded-lg px-3 py-2 text-sm min-h-touch"
-              />
-            </div>
-            <textarea
-              value={form.notes}
-              onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))}
-              rows={3}
-              placeholder="Notes"
-              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
-            />
-            <button
-              type="submit"
-              disabled={creating}
-              className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg px-4 py-2 text-sm font-semibold min-h-touch"
-            >
-              {creating ? 'Saving...' : 'Save Purchase Bill'}
-            </button>
-          </form>
-        </div>
-
-        <div className="bg-white rounded-xl border border-slate-200 p-4 xl:col-span-2">
-          <div className="flex flex-wrap items-center gap-2 mb-3">
-            <select
-              value={supplierFilter ?? ''}
-              onChange={(e) =>
-                setSupplierFilter(e.target.value ? Number(e.target.value) : undefined)
-              }
-              className="border border-slate-300 rounded-lg px-3 py-2 text-sm min-h-touch"
-            >
-              <option value="">All suppliers</option>
-              {suppliers.map((supplier) => (
-                <option key={supplier.id} value={supplier.id}>
-                  {supplier.name}
-                </option>
-              ))}
-            </select>
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="border border-slate-300 rounded-lg px-3 py-2 text-sm min-h-touch"
-            >
-              <option value="">All payment status</option>
-              <option value="unpaid">Unpaid</option>
-              <option value="partial">Partial</option>
-              <option value="paid">Paid</option>
-            </select>
+              <button
+                type="submit"
+                disabled={creating}
+                className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg px-4 py-2 text-sm font-semibold min-h-touch"
+              >
+                {creating ? 'Saving...' : 'Save Purchase Bill'}
+              </button>
+            </form>
           </div>
 
-          {loading ? (
-            <div className="py-10">
-              <LoadingSpinner text="Loading purchase bills..." />
+          <div className="bg-white rounded-xl border border-slate-200 p-4 xl:col-span-2">
+            <div className="flex flex-wrap items-center gap-2 mb-3">
+              <select
+                value={supplierFilter ?? ''}
+                onChange={(e) =>
+                  setSupplierFilter(e.target.value ? Number(e.target.value) : undefined)
+                }
+                className="border border-slate-300 rounded-lg px-3 py-2 text-sm min-h-touch"
+              >
+                <option value="">All suppliers</option>
+                {suppliers.map((supplier) => (
+                  <option key={supplier.id} value={supplier.id}>
+                    {supplier.name}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                className="border border-slate-300 rounded-lg px-3 py-2 text-sm min-h-touch"
+              >
+                <option value="">All payment status</option>
+                <option value="unpaid">Unpaid</option>
+                <option value="partial">Partial</option>
+                <option value="paid">Paid</option>
+              </select>
             </div>
-          ) : (
-            <div className="border border-slate-200 rounded-lg divide-y divide-slate-100 max-h-[520px] overflow-y-auto">
-              {rows.length === 0 ? (
-                <p className="text-sm text-slate-500 p-4">No purchase bills found.</p>
-              ) : (
-                rows.map((row) => (
-                  <div key={row.id} className="px-4 py-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-sm font-medium text-slate-800">{row.bill_number}</p>
-                      <span
-                        className={`text-[11px] px-2 py-0.5 rounded-full ${paymentBadge(
-                          row.payment_status
-                        )}`}
-                      >
-                        {row.payment_status}
-                      </span>
+
+            {loading ? (
+              <div className="py-10">
+                <LoadingSpinner text="Loading purchase bills..." />
+              </div>
+            ) : (
+              <div className="border border-slate-200 rounded-lg divide-y divide-slate-100 max-h-[520px] overflow-y-auto">
+                {rows.length === 0 ? (
+                  <p className="text-sm text-slate-500 p-4">No purchase bills found.</p>
+                ) : (
+                  rows.map((row) => (
+                    <div key={row.id} className="px-4 py-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-sm font-medium text-slate-800">{row.bill_number}</p>
+                        <span
+                          className={`text-[11px] px-2 py-0.5 rounded-full ${paymentBadge(
+                            row.payment_status
+                          )}`}
+                        >
+                          {row.payment_status}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-500">
+                        {supplierMap.get(row.supplier_id) ?? row.supplier_name ?? 'Supplier'} |{' '}
+                        {new Date(row.bill_date).toLocaleDateString()}
+                      </p>
+                      <p className="text-xs text-slate-600">
+                        Total: Rs {row.total_amount.toFixed(2)} | Paid: Rs{' '}
+                        {row.amount_paid.toFixed(2)}
+                      </p>
                     </div>
-                    <p className="text-xs text-slate-500">
-                      {supplierMap.get(row.supplier_id) ?? row.supplier_name ?? 'Supplier'} |{' '}
-                      {new Date(row.bill_date).toLocaleDateString()}
-                    </p>
-                    <p className="text-xs text-slate-600">
-                      Total: Rs {row.total_amount.toFixed(2)} | Paid: Rs{' '}
-                      {row.amount_paid.toFixed(2)}
-                    </p>
-                  </div>
-                ))
-              )}
-            </div>
-          )}
+                  ))
+                )}
+              </div>
+            )}
+          </div>
         </div>
-      </div>
       ) : (
         <div className="bg-white rounded-xl border border-slate-200 p-4 max-w-3xl">
           <h3 className="text-sm font-semibold text-slate-800 mb-3">Create Purchase Order</h3>

@@ -24,6 +24,9 @@ type CustomerEditForm = {
   address: string
   pincode: string
   doctor_id?: number
+  allergies: string
+  chronic_conditions: string
+  med_sync_date?: number
   notes: string
 }
 
@@ -50,6 +53,9 @@ const EMPTY_EDIT: CustomerEditForm = {
   address: '',
   pincode: '',
   doctor_id: undefined,
+  allergies: '',
+  chronic_conditions: '',
+  med_sync_date: undefined,
   notes: '',
 }
 
@@ -111,6 +117,9 @@ export default function CustomersPage() {
         address: customer.address ?? '',
         pincode: customer.pincode ?? '',
         doctor_id: customer.doctor_id,
+        allergies: (customer.allergies ?? []).join(', '),
+        chronic_conditions: (customer.chronic_conditions ?? []).join(', '),
+        med_sync_date: customer.med_sync_date,
         notes: customer.notes ?? '',
       })
     } catch {
@@ -202,6 +211,15 @@ export default function CustomersPage() {
           address: editForm.address.trim() || undefined,
           pincode: editForm.pincode.trim() || undefined,
           doctor_id: editForm.doctor_id,
+          allergies: editForm.allergies
+            .split(',')
+            .map((item) => item.trim())
+            .filter(Boolean),
+          chronic_conditions: editForm.chronic_conditions
+            .split(',')
+            .map((item) => item.trim())
+            .filter(Boolean),
+          med_sync_date: editForm.med_sync_date,
           notes: editForm.notes.trim() || undefined,
           is_active: true,
         },
@@ -446,6 +464,34 @@ export default function CustomersPage() {
                   onChange={(e) => setEditForm((prev) => ({ ...prev, address: e.target.value }))}
                   placeholder="Address"
                   className="border border-slate-300 rounded-lg px-3 py-2 text-sm min-h-touch md:col-span-2"
+                />
+                <input
+                  value={editForm.allergies}
+                  onChange={(e) => setEditForm((prev) => ({ ...prev, allergies: e.target.value }))}
+                  placeholder="Allergies (comma separated)"
+                  className="border border-slate-300 rounded-lg px-3 py-2 text-sm min-h-touch md:col-span-2"
+                />
+                <input
+                  value={editForm.chronic_conditions}
+                  onChange={(e) =>
+                    setEditForm((prev) => ({ ...prev, chronic_conditions: e.target.value }))
+                  }
+                  placeholder="Chronic conditions (comma separated)"
+                  className="border border-slate-300 rounded-lg px-3 py-2 text-sm min-h-touch md:col-span-2"
+                />
+                <input
+                  value={editForm.med_sync_date ?? ''}
+                  onChange={(e) =>
+                    setEditForm((prev) => ({
+                      ...prev,
+                      med_sync_date: e.target.value ? Number(e.target.value) : undefined,
+                    }))
+                  }
+                  type="number"
+                  min={1}
+                  max={31}
+                  placeholder="Med sync day of month"
+                  className="border border-slate-300 rounded-lg px-3 py-2 text-sm min-h-touch"
                 />
                 <textarea
                   value={editForm.notes}
