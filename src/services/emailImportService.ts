@@ -29,5 +29,6 @@ export const emailImportService = {
   fetchInvoices: async () => invoke('email_fetch_invoices'),
   importBill: async (importId: number, data: unknown, userId: number): Promise<number> =>
     invoke<number>('email_import_bill', { importId, data, userId }),
-  listImports: async (): Promise<IEmailImportRow[]> => invoke<IEmailImportRow[]>('email_list_imports'),
+  listImports: async (): Promise<IEmailImportRow[]> =>
+    invoke<IEmailImportRow[]>('email_list_imports'),
 }

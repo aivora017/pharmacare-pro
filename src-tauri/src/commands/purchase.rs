@@ -53,6 +53,16 @@ pub struct PurchaseOrderCreateInput {
 	pub total_amount: Option<f64>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct PurchaseReturnCreateInput {
+	pub debit_note_no: String,
+	pub supplier_id: i64,
+	pub return_date: Option<String>,
+	pub reason: Option<String>,
+	pub total_amount: f64,
+	pub notes: Option<String>,
+}
+
 #[tauri::command]
 pub async fn purchase_create_bill(
 	state: State<'_, AppState>,
@@ -107,5 +117,15 @@ pub async fn purchase_update_supplier(
 ) -> Result<(), AppError> {
 	let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
 	db.purchase_update_supplier(id, &data, user_id)
+}
+
+#[tauri::command]
+pub async fn purchase_create_return(
+	state: State<'_, AppState>,
+	data: PurchaseReturnCreateInput,
+	user_id: i64,
+) -> Result<i64, AppError> {
+	let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+	db.purchase_create_return(&data, user_id)
 }
 

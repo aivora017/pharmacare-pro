@@ -21,3 +21,8 @@ The format is based on Keep a Changelog.
 - Expanded customer profile editing to include allergies, chronic conditions, and med-sync day.
 - Email import commands now avoid runtime todo panics and support test/list flows.
 - Settings page now includes IMAP email configuration and import log viewer.
+- Background email polling task now runs every 20 minutes and triggers invoice fetch.
+- Purchase page now includes CSV and Excel invoice parsing with first-time column mapping.
+- Email import review now supports row-level editing before creating purchase bills.
+- Auto-match for imported lines now maps medicines against the medicine master.
+- Purchase return/debit note creation is now available in backend and Purchase UI.

@@ -295,10 +295,12 @@ export default function SettingsPage() {
                 <div key={row.id} className="px-3 py-2">
                   <p className="text-sm font-medium text-slate-800">{row.email_from}</p>
                   <p className="text-xs text-slate-500">
-                    {row.email_subject || 'No subject'} | {new Date(row.received_at).toLocaleString()}
+                    {row.email_subject || 'No subject'} |{' '}
+                    {new Date(row.received_at).toLocaleString()}
                   </p>
                   <p className="text-xs text-slate-600">
-                    Status: {row.status || 'pending'} | Parsed: {row.rows_parsed} | Imported: {row.rows_imported}
+                    Status: {row.status || 'pending'} | Parsed: {row.rows_parsed} | Imported:{' '}
+                    {row.rows_imported}
                   </p>
                 </div>
               ))

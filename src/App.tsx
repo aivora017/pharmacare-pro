@@ -60,10 +60,7 @@ function ProtectedLayout() {
                 />
               }
             />
-            <Route
-              path="/settings"
-              element={<SettingsPage />}
-            />
+            <Route path="/settings" element={<SettingsPage />} />
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>
         </main>

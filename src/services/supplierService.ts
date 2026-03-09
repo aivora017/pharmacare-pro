@@ -22,6 +22,15 @@ export interface IPurchaseOrderCreateInput {
   total_amount?: number
 }
 
+export interface IPurchaseReturnCreateInput {
+  debit_note_no: string
+  supplier_id: number
+  return_date?: string
+  reason?: string
+  total_amount: number
+  notes?: string
+}
+
 export const supplierService = {
   list: async (): Promise<ISupplier[]> => invoke<ISupplier[]>('purchase_list_suppliers'),
   create: async (data: Partial<ISupplier>, userId: number): Promise<number> =>
@@ -39,4 +48,6 @@ export const purchaseService = {
     invoke('purchase_list_bills', { filters: filters ?? {} }),
   createPO: async (data: IPurchaseOrderCreateInput, userId: number): Promise<number> =>
     invoke<number>('purchase_create_po', { data, userId }),
+  createReturn: async (data: IPurchaseReturnCreateInput, userId: number): Promise<number> =>
+    invoke<number>('purchase_create_return', { data, userId }),
 }

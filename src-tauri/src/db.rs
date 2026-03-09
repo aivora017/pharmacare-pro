@@ -3,6 +3,7 @@ use crate::commands::billing::CreateBillInput;
 use crate::commands::customer::DoctorCreateInput;
 use crate::commands::medicine::{BatchDto, CategoryDto, MedicineDetailDto, MedicineDto};
 use crate::commands::purchase::PurchaseBillCreateInput;
+use crate::commands::purchase::PurchaseReturnCreateInput;
 use crate::commands::purchase::PurchaseOrderCreateInput;
 use crate::commands::purchase::SupplierInput;
 use crate::error::AppError;
@@ -1865,6 +1866,78 @@ impl Database {
         )?;
 
         Ok(())
+    }
+
+    pub fn purchase_create_return(&self, data: &PurchaseReturnCreateInput, user_id: i64) -> Result<i64, AppError> {
+        let debit_note_no = data.debit_note_no.trim();
+        if debit_note_no.is_empty() {
+            return Err(AppError::Validation("Debit note number is required.".to_string()));
+        }
+        if data.total_amount <= 0.0 {
+            return Err(AppError::Validation("Return amount must be greater than zero.".to_string()));
+        }
+
+        let mut conn = self.connection()?;
+        let tx = conn.transaction().map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let supplier_outstanding: f64 = tx
+            .query_row(
+                "SELECT outstanding_balance FROM suppliers WHERE id = ?1 AND deleted_at IS NULL",
+                params![data.supplier_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|e| AppError::Internal(e.to_string()))?
+            .ok_or_else(|| AppError::Validation("Supplier not found.".to_string()))?;
+
+        tx.execute(
+            "INSERT INTO purchase_returns (
+                debit_note_no, supplier_id, return_date, reason,
+                total_amount, status, notes, created_by
+             ) VALUES (?1, ?2, COALESCE(?3, date('now')), ?4, ?5, 'raised', ?6, ?7)",
+            params![
+                debit_note_no,
+                data.supplier_id,
+                data.return_date,
+                data.reason,
+                data.total_amount,
+                data.notes,
+                user_id,
+            ],
+        )
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let return_id = tx.last_insert_rowid();
+        let updated_outstanding = (supplier_outstanding - data.total_amount).max(0.0);
+
+        tx.execute(
+            "UPDATE suppliers
+             SET outstanding_balance = ?1,
+                 updated_at = ?2
+             WHERE id = ?3",
+            params![updated_outstanding, chrono::Utc::now().to_rfc3339(), data.supplier_id],
+        )
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        tx.commit().map_err(|e| AppError::Internal(e.to_string()))?;
+
+        self.write_audit_log(
+            "PURCHASE_RETURN_CREATED",
+            "purchase",
+            &return_id.to_string(),
+            None,
+            Some(
+                &serde_json::json!({
+                    "debit_note_no": debit_note_no,
+                    "supplier_id": data.supplier_id,
+                    "total_amount": data.total_amount,
+                })
+                .to_string(),
+            ),
+            &format!("user:{}", user_id),
+        )?;
+
+        Ok(return_id)
     }
 
     pub fn email_test_connection(&self, config: &serde_json::Value) -> Result<bool, AppError> {

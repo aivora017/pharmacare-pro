@@ -116,6 +116,7 @@ fn main() {
             purchase::purchase_list_suppliers,
             purchase::purchase_create_supplier,
             purchase::purchase_update_supplier,
+            purchase::purchase_create_return,
 
             // Email Import
             email_import::email_test_connection,

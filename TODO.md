@@ -77,13 +77,13 @@
 - [x] Supplier list + add/edit form
 - [x] Manual purchase bill entry (all fields from IPurchaseBill)
 - [x] Email IMAP configuration (Settings → Email)
-- [ ] Email polling service (background, every 20 mins)
-- [ ] CSV/Excel parser for distributor bills
-- [ ] Column mapping UI for first-time import from new distributor
-- [ ] Import review screen (show parsed data, edit before saving)
-- [ ] Auto-match imported items to medicine master
+- [x] Email polling service (background, every 20 mins)
+- [x] CSV/Excel parser for distributor bills
+- [x] Column mapping UI for first-time import from new distributor
+- [x] Import review screen (show parsed data, edit before saving)
+- [x] Auto-match imported items to medicine master
 - [x] Import log (show all past imports with status)
-- [ ] Purchase return / debit note
+- [x] Purchase return / debit note
 
 ## PHASE 5 — Customers & Doctors (Weeks 10–11)
 
