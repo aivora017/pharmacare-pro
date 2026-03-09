@@ -7,7 +7,10 @@ import { create } from "zustand"
 import { calculateItemGST, calculateBillTotals, emptyTotals, type BillTotals } from "@/utils/gst"
 import type { ICartItem, ICustomer } from "@/types"
 
-type CartCustomer = Pick<ICustomer, "id"|"name"|"phone"|"outstanding_balance"|"loyalty_points">
+type CartCustomer = Pick<
+  ICustomer,
+  "id" | "name" | "phone" | "outstanding_balance" | "loyalty_points" | "allergies" | "chronic_conditions"
+>
 
 interface CartStore {
   items: ICartItem[]

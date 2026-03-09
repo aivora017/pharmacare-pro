@@ -9,6 +9,8 @@ export interface CreateBillInput {
   customer_id?: number
   doctor_id?: number
   prescription_ref?: string
+  prescription_image?: string
+  loyalty_points_redeemed?: number
   items: ICartItem[]
   payments: { amount: number; payment_mode: string; reference_no?: string }[]
   discount_amount?: number

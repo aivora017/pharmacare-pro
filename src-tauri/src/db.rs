@@ -298,33 +298,62 @@ impl Database {
             0.0
         };
 
+        let loyalty_points_redeemed = input.loyalty_points_redeemed.unwrap_or(0).max(0);
+        if loyalty_points_redeemed > 0 && input.customer_id.is_none() {
+            return Err(AppError::Validation(
+                "Select a customer to redeem loyalty points.".to_string(),
+            ));
+        }
+
         let loyalty_points_earned = if input.customer_id.is_some() {
             (net_amount / 100.0).floor() as i64
         } else {
             0
         };
 
+        if let Some(customer_id) = input.customer_id {
+            if loyalty_points_redeemed > 0 {
+                let available_points: i64 = tx
+                    .query_row(
+                        "SELECT loyalty_points FROM customers WHERE id = ?1 AND is_active = 1",
+                        params![customer_id],
+                        |row| row.get(0),
+                    )
+                    .optional()
+                    .map_err(|e| AppError::Internal(e.to_string()))?
+                    .ok_or_else(|| AppError::Validation("Customer not found.".to_string()))?;
+
+                if available_points < loyalty_points_redeemed {
+                    return Err(AppError::Validation(format!(
+                        "Only {} loyalty points are available for redemption.",
+                        available_points
+                    )));
+                }
+            }
+        }
+
         tx.execute(
             "INSERT INTO bills (
-                bill_number, customer_id, doctor_id, bill_date, status, prescription_ref,
+                bill_number, customer_id, doctor_id, bill_date, status, prescription_ref, prescription_image,
                 subtotal, discount_amount, taxable_amount,
                 cgst_amount, sgst_amount, igst_amount,
                 total_amount, round_off, net_amount,
                 amount_paid, change_returned, outstanding,
-                loyalty_points_earned, notes, created_by
+                loyalty_points_earned, loyalty_points_redeemed, notes, created_by
              ) VALUES (
-                ?1, ?2, ?3, datetime('now'), 'active', ?4,
-                ?5, ?6, ?7,
-                ?8, ?9, ?10,
-                ?11, ?12, ?13,
-                ?14, ?15, ?16,
-                ?17, ?18, ?19
+                ?1, ?2, ?3, datetime('now'), 'active', ?4, ?5,
+                ?6, ?7, ?8,
+                ?9, ?10, ?11,
+                ?12, ?13, ?14,
+                ?15, ?16, ?17,
+                ?18, ?19, ?20, ?21
              )",
             params![
                 bill_number,
                 input.customer_id,
                 input.doctor_id,
                 input.prescription_ref,
+                input.prescription_image,
                 subtotal,
                 discount_amount,
                 taxable_amount,
@@ -338,6 +367,7 @@ impl Database {
                 change_returned,
                 outstanding,
                 loyalty_points_earned,
+                loyalty_points_redeemed,
                 input.notes,
                 input.created_by,
             ],
@@ -408,10 +438,10 @@ impl Database {
             tx.execute(
                 "UPDATE customers
                  SET outstanding_balance = outstanding_balance + ?1,
-                     loyalty_points = loyalty_points + ?2,
+                     loyalty_points = loyalty_points + ?2 - ?3,
                      updated_at = datetime('now')
-                 WHERE id = ?3",
-                params![outstanding, loyalty_points_earned, customer_id],
+                 WHERE id = ?4",
+                params![outstanding, loyalty_points_earned, loyalty_points_redeemed, customer_id],
             )
             .map_err(|e| AppError::Internal(e.to_string()))?;
         }
@@ -856,7 +886,7 @@ impl Database {
 
         let mut stmt = conn
             .prepare(
-                "SELECT id, name, phone, outstanding_balance, loyalty_points
+                "SELECT id, name, phone, outstanding_balance, loyalty_points, allergies, chronic_conditions
                  FROM customers
                  WHERE is_active = 1
                    AND (
@@ -877,6 +907,8 @@ impl Database {
                     "phone": row.get::<_, Option<String>>(2)?,
                     "outstanding_balance": row.get::<_, f64>(3)?,
                     "loyalty_points": row.get::<_, i64>(4)?,
+                    "allergies": serde_json::from_str::<serde_json::Value>(&row.get::<_, Option<String>>(5)?.unwrap_or_else(|| "[]".to_string())).unwrap_or_else(|_| serde_json::json!([])),
+                    "chronic_conditions": serde_json::from_str::<serde_json::Value>(&row.get::<_, Option<String>>(6)?.unwrap_or_else(|| "[]".to_string())).unwrap_or_else(|_| serde_json::json!([])),
                 }))
             })
             .map_err(|e| AppError::Internal(e.to_string()))?;

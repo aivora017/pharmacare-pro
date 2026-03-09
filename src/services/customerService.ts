@@ -10,6 +10,8 @@ export interface ICustomerSearchItem {
   phone?: string
   outstanding_balance: number
   loyalty_points: number
+  allergies: string[]
+  chronic_conditions: string[]
 }
 
 export interface ICustomerCreateInput {

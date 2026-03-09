@@ -15,7 +15,7 @@
  * 7. Call billingService.createBill() on payment confirm
  */
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { ShoppingCart, Search, User, PauseCircle } from 'lucide-react'
+import { ShoppingCart, Search, User, PauseCircle, Paperclip, AlertTriangle } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useCartStore } from '@/store/cartStore'
 import { useAuthStore } from '@/store/authStore'
@@ -71,6 +71,11 @@ export default function BillingPage() {
   const [showHeldBills, setShowHeldBills] = useState(false)
   const [isLoadingHeldBills, setIsLoadingHeldBills] = useState(false)
   const [heldBills, setHeldBills] = useState<IHeldBillSummary[]>([])
+  const [prescriptionRef, setPrescriptionRef] = useState('')
+  const [prescriptionImage, setPrescriptionImage] = useState<string | undefined>(undefined)
+  const [redeemInput, setRedeemInput] = useState('0')
+  const [redeemedPoints, setRedeemedPoints] = useState(0)
+  const [allergyWarning, setAllergyWarning] = useState('')
   const scannerBufferRef = useRef('')
   const scannerFirstTsRef = useRef(0)
   const scannerLastTsRef = useRef(0)
@@ -88,6 +93,8 @@ export default function BillingPage() {
     setCustomer,
     clear,
   } = useCartStore()
+
+  const payableNetAmount = Math.max(0, totals.net_amount - redeemedPoints)
 
   const maybeShowInteractionWarning = useCallback(
     (incomingMedicineName: string) => {
@@ -231,12 +238,19 @@ export default function BillingPage() {
       setIsSavingBill(true)
       const billId = await billingService.createBill({
         customer_id: customer?.id,
+        prescription_ref: prescriptionRef.trim() || undefined,
+        prescription_image: prescriptionImage,
+        loyalty_points_redeemed: redeemedPoints,
         items,
         payments: payload.payments,
-        discount_amount: totals.bill_discount,
+        discount_amount: totals.bill_discount + redeemedPoints,
         created_by: user.id,
       })
       clear()
+      setPrescriptionRef('')
+      setPrescriptionImage(undefined)
+      setRedeemedPoints(0)
+      setRedeemInput('0')
       setShowPayment(false)
       toast.success(`Bill #${billId} saved successfully.`)
 
@@ -368,6 +382,32 @@ export default function BillingPage() {
     return () => window.removeEventListener('keydown', h)
   }, [items.length, addBarcodeToCart, showPayment, loadHeldBills])
 
+  useEffect(() => {
+    if (!customer || items.length === 0) {
+      setAllergyWarning('')
+      return
+    }
+
+    const tags = [...(customer.allergies ?? []), ...(customer.chronic_conditions ?? [])]
+      .map((value) => value.trim().toLowerCase())
+      .filter((value) => value.length > 1)
+    if (tags.length === 0) {
+      setAllergyWarning('')
+      return
+    }
+
+    const hits = items.filter((item) =>
+      tags.some((tag) => item.medicine_name.toLowerCase().includes(tag))
+    )
+
+    if (hits.length === 0) {
+      setAllergyWarning('')
+      return
+    }
+
+    setAllergyWarning(`Potential allergy/condition match for: ${hits.map((item) => item.medicine_name).join(', ')}`)
+  }, [customer, items])
+
   return (
     <div className="flex h-full bg-slate-50 -m-4 overflow-hidden">
       <div className="flex flex-col flex-1 min-w-0">
@@ -386,6 +426,30 @@ export default function BillingPage() {
               <User size={14} />
               {customer ? customer.name : 'Add Customer (F6)'}
             </button>
+            <label className="flex items-center gap-2 px-3 py-2 text-sm border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors min-h-touch cursor-pointer">
+              <Paperclip size={14} />
+              <span>{prescriptionRef ? 'Prescription Attached' : 'Attach Prescription'}</span>
+              <input
+                type="file"
+                accept="image/*,.pdf,application/pdf"
+                className="hidden"
+                onChange={async (e) => {
+                  const file = e.target.files?.[0]
+                  if (!file) return
+                  setPrescriptionRef(file.name)
+
+                  // Store as base64 so bill record can retain attachment content offline.
+                  const dataUrl = await new Promise<string>((resolve, reject) => {
+                    const reader = new FileReader()
+                    reader.onload = () => resolve(String(reader.result || ''))
+                    reader.onerror = () => reject(new Error('Could not read file'))
+                    reader.readAsDataURL(file)
+                  })
+                  setPrescriptionImage(dataUrl)
+                  toast.success('Prescription file attached.')
+                }}
+              />
+            </label>
             {items.length > 0 && (
               <button
                 onClick={async () => {
@@ -420,6 +484,12 @@ export default function BillingPage() {
           </div>
         </div>
         <div className="px-4 py-3 bg-white border-b border-slate-200">
+          {allergyWarning && (
+            <div className="mb-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 flex items-start gap-2">
+              <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+              <span>{allergyWarning}</span>
+            </div>
+          )}
           <div className="relative">
             <Search size={17} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
@@ -549,10 +619,40 @@ export default function BillingPage() {
           <div className="bg-white border-t border-slate-200 px-4 py-3">
             <div className="flex items-end justify-between">
               <div className="text-sm text-slate-600 space-y-0.5">
+                {customer && (
+                  <p className="text-xs text-slate-500">
+                    Customer points: {customer.loyalty_points} | Outstanding: ₹{customer.outstanding_balance.toFixed(2)}
+                  </p>
+                )}
                 <p>
                   Subtotal: ₹{totals.subtotal.toFixed(2)} &nbsp;|&nbsp; GST: ₹
                   {totals.total_gst.toFixed(2)}
                 </p>
+                {customer && (
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs text-slate-500">Redeem points</label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={redeemInput}
+                      onChange={(e) => setRedeemInput(e.target.value)}
+                      className="w-24 text-center border border-slate-300 rounded text-sm py-0.5 outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const value = Math.floor(Number(redeemInput) || 0)
+                        const maxAllowed = Math.min(customer.loyalty_points, Math.floor(totals.net_amount))
+                        const finalPoints = Math.max(0, Math.min(value, maxAllowed))
+                        setRedeemedPoints(finalPoints)
+                        setRedeemInput(finalPoints.toString())
+                      }}
+                      className="px-2 py-1 text-xs rounded border border-slate-300 hover:bg-slate-100 min-h-touch"
+                    >
+                      Apply
+                    </button>
+                  </div>
+                )}
                 <div className="flex items-center gap-2">
                   <label className="text-xs text-slate-500">Bill discount (₹)</label>
                   <input
@@ -572,12 +672,15 @@ export default function BillingPage() {
                     Bill discount: -₹{totals.bill_discount.toFixed(2)}
                   </p>
                 )}
+                {redeemedPoints > 0 && (
+                  <p className="text-green-600">Loyalty redeemed: -₹{redeemedPoints.toFixed(2)}</p>
+                )}
               </div>
               <div className="flex items-center gap-4">
                 <div className="text-right">
                   <p className="text-xs text-slate-400">Total Amount</p>
                   <p className="text-3xl font-bold text-slate-900">
-                    {formatCurrency(totals.net_amount)}
+                    {formatCurrency(payableNetAmount)}
                   </p>
                 </div>
                 <button
@@ -593,7 +696,7 @@ export default function BillingPage() {
       </div>
       {showPayment && (
         <PaymentPanel
-          netAmount={totals.net_amount}
+          netAmount={payableNetAmount}
           isSaving={isSavingBill}
           onClose={() => setShowPayment(false)}
           onConfirm={(payload) => {
@@ -607,6 +710,8 @@ export default function BillingPage() {
           onClose={() => setShowCustomerSelector(false)}
           onSelect={(c) => {
             setCustomer(c)
+            setRedeemedPoints(0)
+            setRedeemInput('0')
             setShowCustomerSelector(false)
             toast.success('Customer linked to bill.')
           }}

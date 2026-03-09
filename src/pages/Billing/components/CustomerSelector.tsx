@@ -9,6 +9,8 @@ interface Props {
     phone?: string
     outstanding_balance: number
     loyalty_points: number
+    allergies: string[]
+    chronic_conditions: string[]
   }) => void
   onClose: () => void
   userId?: number
@@ -86,6 +88,9 @@ export function CustomerSelector({ onSelect, onClose, userId }: Props) {
                       {row.outstanding_balance.toFixed(2)}
                     </p>
                     <p className="text-xs text-slate-500">Loyalty: {row.loyalty_points} pts</p>
+                    {row.allergies.length > 0 && (
+                      <p className="text-xs text-rose-700">Allergies: {row.allergies.join(', ')}</p>
+                    )}
                   </div>
                   <button
                     type="button"
@@ -137,6 +142,8 @@ export function CustomerSelector({ onSelect, onClose, userId }: Props) {
                     phone: newPhone.trim() || undefined,
                     outstanding_balance: 0,
                     loyalty_points: 0,
+                    allergies: [],
+                    chronic_conditions: [],
                   })
                   toast.success('Customer created and selected.')
                 } catch {

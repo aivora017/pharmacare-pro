@@ -26,3 +26,6 @@ The format is based on Keep a Changelog.
 - Email import review now supports row-level editing before creating purchase bills.
 - Auto-match for imported lines now maps medicines against the medicine master.
 - Purchase return/debit note creation is now available in backend and Purchase UI.
+- POS billing now supports loyalty point redemption with customer point-balance updates.
+- POS billing now supports prescription image/PDF attachment capture on bill save.
+- POS customer selection now carries allergy/chronic data and shows safety warnings on potential medicine matches.

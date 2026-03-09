@@ -26,6 +26,8 @@ use tauri::State;
 pub struct CreateBillInput {
     pub customer_id: Option<i64>, pub doctor_id: Option<i64>,
     pub prescription_ref: Option<String>,
+    pub prescription_image: Option<String>,
+    pub loyalty_points_redeemed: Option<i64>,
     pub items: Vec<BillItemInput>, pub payments: Vec<PaymentInput>,
     pub discount_amount: Option<f64>, pub notes: Option<String>,
     pub created_by: i64,

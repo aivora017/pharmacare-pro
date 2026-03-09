@@ -91,10 +91,10 @@
 - [x] Add/edit customer form (all fields from ICustomer)
 - [x] Customer detail page: purchase history timeline
 - [x] Outstanding balance display and credit payment
-- [ ] Loyalty points display and redemption at POS
+- [x] Loyalty points display and redemption at POS
 - [x] Doctor list + add/edit form
-- [ ] Prescription upload (image/PDF attachment to bill)
-- [ ] Allergy/condition recording and warnings at POS
+- [x] Prescription upload (image/PDF attachment to bill)
+- [x] Allergy/condition recording and warnings at POS
 
 ## PHASE 6 — Expiry & Barcodes (Weeks 12–13)
 
