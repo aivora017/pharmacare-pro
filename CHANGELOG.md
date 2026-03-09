@@ -32,3 +32,4 @@ The format is based on Keep a Changelog.
 - Inventory commands (`inventory_get_stock`, `inventory_get_low_stock`, `inventory_get_expiry_list`, `inventory_adjust_stock`) are now implemented with database logic and audit logging.
 - Expiry page now includes a working expiry dashboard with risk summary cards and a colour-coded expiry table.
 - Expiry page now supports barcode scan lookup to show batch details and add scanned items to a return-list export.
+- Expiry page now creates supplier debit notes directly from selected expiring batches (grouped by supplier).

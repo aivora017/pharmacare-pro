@@ -19,9 +19,12 @@ import { LoadingSpinner } from '@/components/shared/LoadingSpinner'
 import { PageHeader } from '@/components/shared/PageHeader'
 import { inventoryService } from '@/services/inventoryService'
 import { medicineService, type IBatchItem } from '@/services/medicineService'
+import { purchaseService } from '@/services/supplierService'
+import { useAuthStore } from '@/store/authStore'
 
 type ExpiryRow = IBatchItem & {
   medicine_name?: string
+  supplier_id?: number
   supplier_name?: string
 }
 
@@ -34,8 +37,10 @@ function daysToExpiry(expiryDate: string) {
 
 function riskForRow(row: ExpiryRow) {
   const days = daysToExpiry(row.expiry_date)
-  if (days < 0) return { level: 'critical', label: 'Expired', action: 'Return or dispose immediately' }
-  if (days <= 30) return { level: 'critical', label: 'Critical', action: 'Push sale / return to supplier' }
+  if (days < 0)
+    return { level: 'critical', label: 'Expired', action: 'Return or dispose immediately' }
+  if (days <= 30)
+    return { level: 'critical', label: 'Critical', action: 'Push sale / return to supplier' }
   if (days <= 60) return { level: 'high', label: 'High', action: 'Place on priority shelf' }
   if (days <= 90) return { level: 'medium', label: 'Medium', action: 'Track weekly' }
   return { level: 'low', label: 'Low', action: 'Normal monitoring' }
@@ -49,8 +54,10 @@ function riskBadge(level: string) {
 }
 
 export default function ExpiryPage() {
+  const user = useAuthStore((state) => state.user)
   const [withinDays, setWithinDays] = useState(90)
   const [loading, setLoading] = useState(true)
+  const [creatingReturn, setCreatingReturn] = useState(false)
   const [rows, setRows] = useState<ExpiryRow[]>([])
   const [scanInput, setScanInput] = useState('')
   const [scanned, setScanned] = useState<ExpiryRow | null>(null)
@@ -156,6 +163,83 @@ export default function ExpiryPage() {
     toast.success('Return list downloaded.')
   }
 
+  const createReturnNotes = async () => {
+    if (!user) {
+      toast.error('Please login again.')
+      return
+    }
+    if (selectedRows.length === 0) {
+      toast.error('Select at least one batch for return note.')
+      return
+    }
+
+    const grouped = new Map<number, ExpiryRow[]>()
+    for (const row of selectedRows) {
+      if (!row.supplier_id) continue
+      const existing = grouped.get(row.supplier_id) ?? []
+      existing.push(row)
+      grouped.set(row.supplier_id, existing)
+    }
+
+    if (grouped.size === 0) {
+      toast.error('Selected rows do not have supplier links, cannot create return note.')
+      return
+    }
+
+    setCreatingReturn(true)
+    try {
+      let createdCount = 0
+      for (const [supplierId, supplierRows] of grouped.entries()) {
+        const totalAmount = Number(
+          supplierRows
+            .reduce((sum, row) => sum + row.quantity_on_hand * row.purchase_price, 0)
+            .toFixed(2)
+        )
+
+        if (totalAmount <= 0) continue
+
+        const dateKey = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+        const suffix = String(Date.now()).slice(-4)
+        const debitNo = `EXP-RTN-${dateKey}-${supplierId}-${suffix}`
+
+        const detailLines = supplierRows
+          .slice(0, 8)
+          .map(
+            (row) =>
+              `${row.medicine_name ?? 'Unknown'} [${row.batch_number}] qty=${row.quantity_on_hand} exp=${row.expiry_date}`
+          )
+          .join('; ')
+
+        await purchaseService.createReturn(
+          {
+            debit_note_no: debitNo,
+            supplier_id: supplierId,
+            return_date: new Date().toISOString().slice(0, 10),
+            reason: 'Expiry return',
+            total_amount: totalAmount,
+            notes: `Auto-created from Expiry module (${supplierRows.length} batch(es)). ${detailLines}`,
+          },
+          user.id
+        )
+        createdCount += 1
+      }
+
+      if (createdCount === 0) {
+        toast.error('No return notes were created.')
+        return
+      }
+
+      setSelected({})
+      toast.success(`Created ${createdCount} return note(s).`)
+      await loadData()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      toast.error(message || 'Could not create return note(s).')
+    } finally {
+      setCreatingReturn(false)
+    }
+  }
+
   return (
     <div className="max-w-7xl mx-auto space-y-4">
       <PageHeader title="Expiry" subtitle="Expiry Check and Risk Dashboard" />
@@ -192,7 +276,9 @@ export default function ExpiryPage() {
 
         {scanned && (
           <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
-            <p className="text-sm font-semibold text-slate-800">{scanned.medicine_name ?? 'Unknown medicine'}</p>
+            <p className="text-sm font-semibold text-slate-800">
+              {scanned.medicine_name ?? 'Unknown medicine'}
+            </p>
             <p className="text-xs text-slate-600 mt-1">
               Batch: {scanned.batch_number} | Expiry: {scanned.expiry_date} | Rack:{' '}
               {scanned.rack_location || '-'} | Qty: {scanned.quantity_on_hand}
@@ -223,19 +309,33 @@ export default function ExpiryPage() {
       <div className="bg-white rounded-xl border border-slate-200 p-4">
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-semibold text-slate-800">Expiry Risk Table</h3>
-          <button
-            type="button"
-            onClick={buildReturnList}
-            className="min-h-touch rounded-lg bg-rose-700 hover:bg-rose-800 text-white px-3 py-2 text-sm font-semibold"
-          >
-            Build Return List ({selectedRows.length})
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={buildReturnList}
+              className="min-h-touch rounded-lg bg-rose-700 hover:bg-rose-800 text-white px-3 py-2 text-sm font-semibold"
+            >
+              Export Return CSV ({selectedRows.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                void createReturnNotes()
+              }}
+              disabled={creatingReturn}
+              className="min-h-touch rounded-lg bg-blue-700 hover:bg-blue-800 disabled:bg-blue-400 text-white px-3 py-2 text-sm font-semibold"
+            >
+              {creatingReturn ? 'Creating...' : 'Create Return Note'}
+            </button>
+          </div>
         </div>
 
         {loading ? (
           <LoadingSpinner text="Loading expiry data..." />
         ) : sortedRows.length === 0 ? (
-          <p className="text-sm text-slate-500 py-8 text-center">No expiring batches found in selected window.</p>
+          <p className="text-sm text-slate-500 py-8 text-center">
+            No expiring batches found in selected window.
+          </p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -264,7 +364,9 @@ export default function ExpiryPage() {
                           }
                         />
                       </td>
-                      <td className="px-3 py-2 text-slate-800 font-medium">{row.medicine_name || '-'}</td>
+                      <td className="px-3 py-2 text-slate-800 font-medium">
+                        {row.medicine_name || '-'}
+                      </td>
                       <td className="px-3 py-2 text-slate-600">{row.batch_number}</td>
                       <td className="px-3 py-2 text-slate-600">{row.expiry_date}</td>
                       <td className="px-3 py-2 text-slate-600">{row.quantity_on_hand}</td>
