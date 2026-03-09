@@ -12,6 +12,7 @@ import PurchasePage from '@/pages/Purchase'
 import CustomersPage from '@/pages/Customers'
 import DoctorsPage from '@/pages/Doctors'
 import SuppliersPage from '@/pages/Suppliers'
+import SettingsPage from '@/pages/Settings'
 import { ModulePlaceholderPage } from '@/pages/ModulePlaceholder'
 
 void useNavigate
@@ -61,12 +62,7 @@ function ProtectedLayout() {
             />
             <Route
               path="/settings"
-              element={
-                <ModulePlaceholderPage
-                  title="Settings"
-                  description="Pharmacy profile and user settings screens are under active development."
-                />
-              }
+              element={<SettingsPage />}
             />
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>

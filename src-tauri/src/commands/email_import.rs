@@ -16,22 +16,22 @@ use tauri::State;
 
 #[tauri::command]
 pub async fn email_test_connection(state: State<'_, AppState>, config: serde_json::Value) -> Result<bool, AppError> {
-    // TODO: try connecting with provided IMAP config, return success/failure
-    todo!("email_test_connection")
+    let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+    db.email_test_connection(&config)
 }
 #[tauri::command]
 pub async fn email_fetch_invoices(state: State<'_, AppState>) -> Result<serde_json::Value, AppError> {
-    // TODO: poll IMAP, return list of detected invoice emails with parsed data
-    todo!("email_fetch_invoices")
+    let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+    db.email_fetch_invoices()
 }
 #[tauri::command]
 pub async fn email_import_bill(state: State<'_, AppState>, import_id: i64, data: serde_json::Value, user_id: i64) -> Result<i64, AppError> {
-    // TODO: call purchase_create_bill with source="email_import", mark email_imports as processed
-    todo!("email_import_bill")
+    let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+    db.email_import_bill(import_id, &data, user_id)
 }
 #[tauri::command]
 pub async fn email_list_imports(state: State<'_, AppState>) -> Result<serde_json::Value, AppError> {
-    // TODO: SELECT email_imports ORDER BY received_at DESC
-    todo!("email_list_imports")
+    let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+    db.email_list_imports()
 }
 

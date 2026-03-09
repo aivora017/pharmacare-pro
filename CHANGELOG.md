@@ -19,3 +19,5 @@ The format is based on Keep a Changelog.
 - Customer credit payment command and UI action to reduce outstanding balances with audit logging.
 - Purchase order creation command and Purchase tab support for creating draft POs.
 - Expanded customer profile editing to include allergies, chronic conditions, and med-sync day.
+- Email import commands now avoid runtime todo panics and support test/list flows.
+- Settings page now includes IMAP email configuration and import log viewer.

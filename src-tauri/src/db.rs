@@ -1867,6 +1867,96 @@ impl Database {
         Ok(())
     }
 
+    pub fn email_test_connection(&self, config: &serde_json::Value) -> Result<bool, AppError> {
+        let host = config.get("host").and_then(|v| v.as_str()).unwrap_or("").trim();
+        let email = config.get("email").and_then(|v| v.as_str()).unwrap_or("").trim();
+        let password = config
+            .get("password")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim();
+        let port = config.get("port").and_then(|v| v.as_i64()).unwrap_or(0);
+
+        if host.is_empty() || email.is_empty() || password.is_empty() || port <= 0 {
+            return Err(AppError::Validation(
+                "Please enter host, port, email, and password to test connection.".to_string(),
+            ));
+        }
+
+        // Placeholder until real IMAP wiring is added; validates config shape for now.
+        Ok(true)
+    }
+
+    pub fn email_fetch_invoices(&self) -> Result<serde_json::Value, AppError> {
+        // Placeholder: in next phase this will poll IMAP and parse attachments.
+        Ok(serde_json::json!([]))
+    }
+
+    pub fn email_import_bill(
+        &self,
+        import_id: i64,
+        _data: &serde_json::Value,
+        _user_id: i64,
+    ) -> Result<i64, AppError> {
+        let conn = self.connection()?;
+
+        let exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(1) FROM email_imports WHERE id = ?1",
+                params![import_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        if exists == 0 {
+            return Err(AppError::Validation("Import record not found.".to_string()));
+        }
+
+        Err(AppError::Validation(
+            "Invoice-to-purchase conversion will be enabled in the next phase.".to_string(),
+        ))
+    }
+
+    pub fn email_list_imports(&self) -> Result<serde_json::Value, AppError> {
+        let conn = self.connection()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT
+                    id, email_from, email_subject, received_at,
+                    attachment_name, status, error_message,
+                    supplier_id, rows_parsed, rows_imported, created_at
+                 FROM email_imports
+                 ORDER BY received_at DESC, id DESC
+                 LIMIT 200",
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(serde_json::json!({
+                    "id": row.get::<_, i64>(0)?,
+                    "email_from": row.get::<_, String>(1)?,
+                    "email_subject": row.get::<_, Option<String>>(2)?,
+                    "received_at": row.get::<_, String>(3)?,
+                    "attachment_name": row.get::<_, Option<String>>(4)?,
+                    "status": row.get::<_, Option<String>>(5)?,
+                    "error_message": row.get::<_, Option<String>>(6)?,
+                    "supplier_id": row.get::<_, Option<i64>>(7)?,
+                    "rows_parsed": row.get::<_, i64>(8)?,
+                    "rows_imported": row.get::<_, i64>(9)?,
+                    "created_at": row.get::<_, String>(10)?,
+                }))
+            })
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let mut items = Vec::new();
+        for row in rows {
+            items.push(row.map_err(|e| AppError::Internal(e.to_string()))?);
+        }
+
+        Ok(serde_json::Value::Array(items))
+    }
+
     pub fn update_password(&self, user_id: i64, new_hash: &str) -> Result<(), AppError> {
         let conn = self.connection()?;
         let changed = conn
