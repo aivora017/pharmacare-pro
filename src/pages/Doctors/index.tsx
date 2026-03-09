@@ -159,7 +159,10 @@ export default function DoctorsPage() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-4">
-      <PageHeader title="Doctors" subtitle="Manage doctor profiles used in prescriptions and billing" />
+      <PageHeader
+        title="Doctors"
+        subtitle="Manage doctor profiles used in prescriptions and billing"
+      />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="bg-white rounded-xl border border-slate-200 p-4 lg:col-span-1">

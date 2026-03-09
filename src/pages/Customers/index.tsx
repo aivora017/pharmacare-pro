@@ -309,7 +309,8 @@ export default function CustomersPage() {
                       row.outstanding_balance > 0 ? 'text-red-600' : 'text-slate-500'
                     }`}
                   >
-                    Outstanding: Rs {row.outstanding_balance.toFixed(2)} | Loyalty: {row.loyalty_points}
+                    Outstanding: Rs {row.outstanding_balance.toFixed(2)} | Loyalty:{' '}
+                    {row.loyalty_points}
                   </p>
                 </button>
               ))
@@ -329,7 +330,9 @@ export default function CustomersPage() {
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
                   <p className="text-xs text-slate-500">Outstanding</p>
-                  <p className="text-sm font-semibold text-red-600">Rs {selected.outstanding_balance.toFixed(2)}</p>
+                  <p className="text-sm font-semibold text-red-600">
+                    Rs {selected.outstanding_balance.toFixed(2)}
+                  </p>
                   <div className="mt-2 flex gap-2">
                     <input
                       value={creditAmount || ''}
@@ -401,13 +404,17 @@ export default function CustomersPage() {
                 </select>
                 <input
                   value={editForm.blood_group}
-                  onChange={(e) => setEditForm((prev) => ({ ...prev, blood_group: e.target.value }))}
+                  onChange={(e) =>
+                    setEditForm((prev) => ({ ...prev, blood_group: e.target.value }))
+                  }
                   placeholder="Blood group"
                   className="border border-slate-300 rounded-lg px-3 py-2 text-sm min-h-touch"
                 />
                 <input
                   value={editForm.date_of_birth}
-                  onChange={(e) => setEditForm((prev) => ({ ...prev, date_of_birth: e.target.value }))}
+                  onChange={(e) =>
+                    setEditForm((prev) => ({ ...prev, date_of_birth: e.target.value }))
+                  }
                   type="date"
                   className="border border-slate-300 rounded-lg px-3 py-2 text-sm min-h-touch"
                 />
@@ -469,7 +476,8 @@ export default function CustomersPage() {
                           {new Date(item.bill_date).toLocaleString()} | Items: {item.item_count}
                         </p>
                         <p className="text-xs text-slate-600">
-                          Net: Rs {item.net_amount.toFixed(2)} | Outstanding: Rs {item.outstanding.toFixed(2)}
+                          Net: Rs {item.net_amount.toFixed(2)} | Outstanding: Rs{' '}
+                          {item.outstanding.toFixed(2)}
                         </p>
                       </div>
                     ))

@@ -44,6 +44,15 @@ pub struct SupplierInput {
 	pub reliability_score: Option<f64>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct PurchaseOrderCreateInput {
+	pub po_number: String,
+	pub supplier_id: i64,
+	pub expected_by: Option<String>,
+	pub notes: Option<String>,
+	pub total_amount: Option<f64>,
+}
+
 #[tauri::command]
 pub async fn purchase_create_bill(
 	state: State<'_, AppState>,
@@ -67,7 +76,14 @@ pub async fn purchase_list_bills(
 	db.purchase_list_bills(&filters)
 }
 #[tauri::command]
-pub async fn purchase_create_po(state: State<'_, AppState>, data: serde_json::Value, user_id: i64) -> Result<i64, AppError> { todo!("purchase_create_po") }
+pub async fn purchase_create_po(
+	state: State<'_, AppState>,
+	data: PurchaseOrderCreateInput,
+	user_id: i64,
+) -> Result<i64, AppError> {
+	let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+	db.purchase_create_po(&data, user_id)
+}
 #[tauri::command]
 pub async fn purchase_create_supplier(
 	state: State<'_, AppState>,

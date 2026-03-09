@@ -46,22 +46,10 @@ function ProtectedLayout() {
             <Route path="/dashboard" element={<DashboardPage />} />
             <Route path="/billing" element={<BillingPage />} />
             <Route path="/medicine" element={<MedicinePage />} />
-            <Route
-              path="/purchase"
-              element={<PurchasePage />}
-            />
-            <Route
-              path="/customers"
-              element={<CustomersPage />}
-            />
-            <Route
-              path="/doctors"
-              element={<DoctorsPage />}
-            />
-            <Route
-              path="/suppliers"
-              element={<SuppliersPage />}
-            />
+            <Route path="/purchase" element={<PurchasePage />} />
+            <Route path="/customers" element={<CustomersPage />} />
+            <Route path="/doctors" element={<DoctorsPage />} />
+            <Route path="/suppliers" element={<SuppliersPage />} />
             <Route
               path="/reports"
               element={

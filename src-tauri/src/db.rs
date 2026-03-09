@@ -3,6 +3,7 @@ use crate::commands::billing::CreateBillInput;
 use crate::commands::customer::DoctorCreateInput;
 use crate::commands::medicine::{BatchDto, CategoryDto, MedicineDetailDto, MedicineDto};
 use crate::commands::purchase::PurchaseBillCreateInput;
+use crate::commands::purchase::PurchaseOrderCreateInput;
 use crate::commands::purchase::SupplierInput;
 use crate::error::AppError;
 use bcrypt::{hash, DEFAULT_COST};
@@ -1516,6 +1517,66 @@ impl Database {
         )?;
 
         Ok(bill_id)
+    }
+
+    pub fn purchase_create_po(&self, data: &PurchaseOrderCreateInput, user_id: i64) -> Result<i64, AppError> {
+        let po_number = data.po_number.trim();
+        if po_number.is_empty() {
+            return Err(AppError::Validation("Purchase order number is required.".to_string()));
+        }
+
+        let conn = self.connection()?;
+
+        let supplier_active: i64 = conn
+            .query_row(
+                "SELECT is_active FROM suppliers WHERE id = ?1 AND deleted_at IS NULL",
+                params![data.supplier_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|e| AppError::Internal(e.to_string()))?
+            .ok_or_else(|| AppError::Validation("Supplier not found.".to_string()))?;
+
+        if supplier_active != 1 {
+            return Err(AppError::Validation("Supplier is inactive.".to_string()));
+        }
+
+        let total_amount = data.total_amount.unwrap_or(0.0).max(0.0);
+
+        conn.execute(
+            "INSERT INTO purchase_orders (
+                po_number, supplier_id, status, order_date,
+                expected_by, notes, total_amount, created_by
+             ) VALUES (?1, ?2, 'draft', date('now'), ?3, ?4, ?5, ?6)",
+            params![
+                po_number,
+                data.supplier_id,
+                data.expected_by.as_ref().map(|v| v.trim()).filter(|v| !v.is_empty()),
+                data.notes.as_ref().map(|v| v.trim()).filter(|v| !v.is_empty()),
+                total_amount,
+                user_id,
+            ],
+        )
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let po_id = conn.last_insert_rowid();
+        self.write_audit_log(
+            "PURCHASE_PO_CREATED",
+            "purchase",
+            &po_id.to_string(),
+            None,
+            Some(
+                &serde_json::json!({
+                    "po_number": po_number,
+                    "supplier_id": data.supplier_id,
+                    "total_amount": total_amount,
+                })
+                .to_string(),
+            ),
+            &format!("user:{}", user_id),
+        )?;
+
+        Ok(po_id)
     }
 
     pub fn purchase_get_bill(&self, id: i64) -> Result<serde_json::Value, AppError> {

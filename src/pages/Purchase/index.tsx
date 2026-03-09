@@ -18,6 +18,14 @@ type PurchaseForm = {
   notes: string
 }
 
+type PurchaseOrderForm = {
+  po_number: string
+  supplier_id?: number
+  expected_by: string
+  total_amount: number
+  notes: string
+}
+
 function paymentBadge(status: string) {
   if (status === 'paid') return 'bg-emerald-100 text-emerald-700'
   if (status === 'partial') return 'bg-amber-100 text-amber-700'
@@ -34,6 +42,8 @@ export default function PurchasePage() {
   const [rows, setRows] = useState<IPurchaseBill[]>([])
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
+  const [creatingPo, setCreatingPo] = useState(false)
+  const [activeTab, setActiveTab] = useState<'bills' | 'po'>('bills')
   const [supplierFilter, setSupplierFilter] = useState<number | undefined>(undefined)
   const [statusFilter, setStatusFilter] = useState('')
   const [form, setForm] = useState<PurchaseForm>({
@@ -43,6 +53,13 @@ export default function PurchasePage() {
     due_date: '',
     total_amount: 0,
     amount_paid: 0,
+    notes: '',
+  })
+  const [poForm, setPoForm] = useState<PurchaseOrderForm>({
+    po_number: '',
+    supplier_id: undefined,
+    expected_by: '',
+    total_amount: 0,
     notes: '',
   })
 
@@ -126,10 +143,75 @@ export default function PurchasePage() {
     }
   }
 
+  const handleCreatePo = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!user) {
+      toast.error('Please login again.')
+      return
+    }
+    if (!poForm.po_number.trim()) {
+      toast.error('Purchase order number is required.')
+      return
+    }
+    if (!poForm.supplier_id) {
+      toast.error('Please select a supplier.')
+      return
+    }
+
+    setCreatingPo(true)
+    try {
+      await purchaseService.createPO(
+        {
+          po_number: poForm.po_number.trim(),
+          supplier_id: poForm.supplier_id,
+          expected_by: poForm.expected_by || undefined,
+          total_amount: poForm.total_amount || undefined,
+          notes: poForm.notes.trim() || undefined,
+        },
+        user.id
+      )
+      toast.success('Purchase order created.')
+      setPoForm({
+        po_number: '',
+        supplier_id: undefined,
+        expected_by: '',
+        total_amount: 0,
+        notes: '',
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      toast.error(message || 'Could not create purchase order.')
+    } finally {
+      setCreatingPo(false)
+    }
+  }
+
   return (
     <div className="max-w-7xl mx-auto space-y-4">
       <PageHeader title="Purchase" subtitle="Manual purchase bill entry and tracking" />
 
+      <div className="bg-white rounded-xl border border-slate-200 p-2 inline-flex gap-2">
+        <button
+          type="button"
+          onClick={() => setActiveTab('bills')}
+          className={`px-4 py-2 rounded-lg text-sm font-medium min-h-touch ${
+            activeTab === 'bills' ? 'bg-blue-600 text-white' : 'text-slate-700 hover:bg-slate-100'
+          }`}
+        >
+          Bills
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('po')}
+          className={`px-4 py-2 rounded-lg text-sm font-medium min-h-touch ${
+            activeTab === 'po' ? 'bg-blue-600 text-white' : 'text-slate-700 hover:bg-slate-100'
+          }`}
+        >
+          Purchase Orders
+        </button>
+      </div>
+
+      {activeTab === 'bills' ? (
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
         <div className="bg-white rounded-xl border border-slate-200 p-4 xl:col-span-1">
           <h3 className="text-sm font-semibold text-slate-800 mb-3">Add Purchase Bill</h3>
@@ -174,7 +256,9 @@ export default function PurchasePage() {
             <div className="grid grid-cols-2 gap-2">
               <input
                 value={form.total_amount}
-                onChange={(e) => setForm((prev) => ({ ...prev, total_amount: Number(e.target.value) || 0 }))}
+                onChange={(e) =>
+                  setForm((prev) => ({ ...prev, total_amount: Number(e.target.value) || 0 }))
+                }
                 type="number"
                 min={0}
                 step="0.01"
@@ -183,7 +267,9 @@ export default function PurchasePage() {
               />
               <input
                 value={form.amount_paid}
-                onChange={(e) => setForm((prev) => ({ ...prev, amount_paid: Number(e.target.value) || 0 }))}
+                onChange={(e) =>
+                  setForm((prev) => ({ ...prev, amount_paid: Number(e.target.value) || 0 }))
+                }
                 type="number"
                 min={0}
                 step="0.01"
@@ -212,7 +298,9 @@ export default function PurchasePage() {
           <div className="flex flex-wrap items-center gap-2 mb-3">
             <select
               value={supplierFilter ?? ''}
-              onChange={(e) => setSupplierFilter(e.target.value ? Number(e.target.value) : undefined)}
+              onChange={(e) =>
+                setSupplierFilter(e.target.value ? Number(e.target.value) : undefined)
+              }
               className="border border-slate-300 rounded-lg px-3 py-2 text-sm min-h-touch"
             >
               <option value="">All suppliers</option>
@@ -256,10 +344,12 @@ export default function PurchasePage() {
                       </span>
                     </div>
                     <p className="text-xs text-slate-500">
-                      {supplierMap.get(row.supplier_id) ?? row.supplier_name ?? 'Supplier'} | {new Date(row.bill_date).toLocaleDateString()}
+                      {supplierMap.get(row.supplier_id) ?? row.supplier_name ?? 'Supplier'} |{' '}
+                      {new Date(row.bill_date).toLocaleDateString()}
                     </p>
                     <p className="text-xs text-slate-600">
-                      Total: Rs {row.total_amount.toFixed(2)} | Paid: Rs {row.amount_paid.toFixed(2)}
+                      Total: Rs {row.total_amount.toFixed(2)} | Paid: Rs{' '}
+                      {row.amount_paid.toFixed(2)}
                     </p>
                   </div>
                 ))
@@ -268,6 +358,69 @@ export default function PurchasePage() {
           )}
         </div>
       </div>
+      ) : (
+        <div className="bg-white rounded-xl border border-slate-200 p-4 max-w-3xl">
+          <h3 className="text-sm font-semibold text-slate-800 mb-3">Create Purchase Order</h3>
+          <form className="space-y-3" onSubmit={handleCreatePo}>
+            <input
+              value={poForm.po_number}
+              onChange={(e) => setPoForm((prev) => ({ ...prev, po_number: e.target.value }))}
+              placeholder="PO number"
+              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm min-h-touch"
+            />
+            <select
+              value={poForm.supplier_id ?? ''}
+              onChange={(e) =>
+                setPoForm((prev) => ({
+                  ...prev,
+                  supplier_id: e.target.value ? Number(e.target.value) : undefined,
+                }))
+              }
+              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm min-h-touch"
+            >
+              <option value="">Select supplier</option>
+              {suppliers.map((supplier) => (
+                <option key={supplier.id} value={supplier.id}>
+                  {supplier.name}
+                </option>
+              ))}
+            </select>
+            <div className="grid grid-cols-2 gap-2">
+              <input
+                value={poForm.expected_by}
+                onChange={(e) => setPoForm((prev) => ({ ...prev, expected_by: e.target.value }))}
+                type="date"
+                className="border border-slate-300 rounded-lg px-3 py-2 text-sm min-h-touch"
+              />
+              <input
+                value={poForm.total_amount}
+                onChange={(e) =>
+                  setPoForm((prev) => ({ ...prev, total_amount: Number(e.target.value) || 0 }))
+                }
+                type="number"
+                min={0}
+                step="0.01"
+                placeholder="Expected total"
+                className="border border-slate-300 rounded-lg px-3 py-2 text-sm min-h-touch"
+              />
+            </div>
+            <textarea
+              value={poForm.notes}
+              onChange={(e) => setPoForm((prev) => ({ ...prev, notes: e.target.value }))}
+              rows={3}
+              placeholder="Notes"
+              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
+            />
+            <button
+              type="submit"
+              disabled={creatingPo}
+              className="w-full bg-slate-800 hover:bg-slate-900 disabled:bg-slate-400 text-white rounded-lg px-4 py-2 text-sm font-semibold min-h-touch"
+            >
+              {creatingPo ? 'Saving...' : 'Create Purchase Order'}
+            </button>
+          </form>
+        </div>
+      )}
     </div>
   )
 }

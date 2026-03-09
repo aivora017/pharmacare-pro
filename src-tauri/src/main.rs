@@ -112,6 +112,7 @@ fn main() {
             purchase::purchase_create_bill,
             purchase::purchase_get_bill,
             purchase::purchase_list_bills,
+            purchase::purchase_create_po,
             purchase::purchase_list_suppliers,
             purchase::purchase_create_supplier,
             purchase::purchase_update_supplier,

@@ -38,7 +38,8 @@ function getLicenceStatus(expiry?: string) {
   if (!expiry) return { label: 'Unknown', className: 'text-slate-600 bg-slate-100' }
   const today = new Date()
   const date = new Date(expiry)
-  if (Number.isNaN(date.getTime())) return { label: 'Unknown', className: 'text-slate-600 bg-slate-100' }
+  if (Number.isNaN(date.getTime()))
+    return { label: 'Unknown', className: 'text-slate-600 bg-slate-100' }
   const days = Math.floor((date.getTime() - today.getTime()) / (24 * 60 * 60 * 1000))
   if (days < 0) return { label: 'Expired', className: 'text-red-700 bg-red-100' }
   if (days <= 30) return { label: 'Expiring Soon', className: 'text-amber-700 bg-amber-100' }
@@ -258,9 +259,13 @@ export default function SuppliersPage() {
                         }`}
                       >
                         <p className="text-sm font-medium text-slate-800">{row.name}</p>
-                        <p className="text-xs text-slate-500">{row.phone || 'No phone'} | {row.email || 'No email'}</p>
+                        <p className="text-xs text-slate-500">
+                          {row.phone || 'No phone'} | {row.email || 'No email'}
+                        </p>
                         <div className="flex items-center gap-2 mt-1">
-                          <span className={`text-[11px] px-2 py-0.5 rounded-full ${status.className}`}>
+                          <span
+                            className={`text-[11px] px-2 py-0.5 rounded-full ${status.className}`}
+                          >
                             {status.label}
                           </span>
                           <span className="text-[11px] text-slate-500">
@@ -327,7 +332,10 @@ export default function SuppliersPage() {
                       <input
                         value={editForm.payment_terms}
                         onChange={(e) =>
-                          setEditForm((prev) => ({ ...prev, payment_terms: Number(e.target.value) || 0 }))
+                          setEditForm((prev) => ({
+                            ...prev,
+                            payment_terms: Number(e.target.value) || 0,
+                          }))
                         }
                         type="number"
                         min={0}
@@ -337,7 +345,10 @@ export default function SuppliersPage() {
                       <input
                         value={editForm.credit_limit}
                         onChange={(e) =>
-                          setEditForm((prev) => ({ ...prev, credit_limit: Number(e.target.value) || 0 }))
+                          setEditForm((prev) => ({
+                            ...prev,
+                            credit_limit: Number(e.target.value) || 0,
+                          }))
                         }
                         type="number"
                         min={0}
@@ -348,7 +359,10 @@ export default function SuppliersPage() {
                       <input
                         value={editForm.reliability_score}
                         onChange={(e) =>
-                          setEditForm((prev) => ({ ...prev, reliability_score: Number(e.target.value) || 0 }))
+                          setEditForm((prev) => ({
+                            ...prev,
+                            reliability_score: Number(e.target.value) || 0,
+                          }))
                         }
                         type="number"
                         min={0}
