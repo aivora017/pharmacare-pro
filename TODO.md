@@ -98,8 +98,8 @@
 
 ## PHASE 6 — Expiry & Barcodes (Weeks 12–13)
 
-- [ ] Expiry dashboard (list all batches by expiry, colour-coded)
-- [ ] Barcode scan in Expiry mode → show full batch details
+- [x] Expiry dashboard (list all batches by expiry, colour-coded)
+- [x] Barcode scan in Expiry mode → show full batch details
 - [ ] Build expiry return list (scan multiple → create return note)
 - [ ] Barcode generator (bulk generate for selected batches)
 - [ ] Label template designer (size, fields to print)

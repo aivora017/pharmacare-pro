@@ -29,3 +29,6 @@ The format is based on Keep a Changelog.
 - POS billing now supports loyalty point redemption with customer point-balance updates.
 - POS billing now supports prescription image/PDF attachment capture on bill save.
 - POS customer selection now carries allergy/chronic data and shows safety warnings on potential medicine matches.
+- Inventory commands (`inventory_get_stock`, `inventory_get_low_stock`, `inventory_get_expiry_list`, `inventory_adjust_stock`) are now implemented with database logic and audit logging.
+- Expiry page now includes a working expiry dashboard with risk summary cards and a colour-coded expiry table.
+- Expiry page now supports barcode scan lookup to show batch details and add scanned items to a return-list export.

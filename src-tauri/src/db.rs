@@ -2674,6 +2674,222 @@ impl Database {
         Ok(())
     }
 
+    pub fn inventory_get_stock(&self, filters: &serde_json::Value) -> Result<serde_json::Value, AppError> {
+        let conn = self.connection()?;
+
+        let search = filters
+            .get("search")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_lowercase();
+        let like = format!("%{}%", search);
+        let category_id = filters.get("category_id").and_then(|v| v.as_i64());
+        let low_stock_only = filters
+            .get("low_stock")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        let mut stmt = conn
+            .prepare(
+                "SELECT
+                    m.id,
+                    m.name,
+                    m.generic_name,
+                    m.category_id,
+                    c.name,
+                    m.schedule,
+                    m.default_gst_rate,
+                    m.reorder_level,
+                    COALESCE(SUM(CASE WHEN b.is_active = 1 THEN (b.quantity_in - b.quantity_sold - b.quantity_adjusted) ELSE 0 END), 0) AS total_stock,
+                    m.is_active
+                 FROM medicines m
+                 LEFT JOIN categories c ON c.id = m.category_id
+                 LEFT JOIN batches b ON b.medicine_id = m.id
+                 WHERE m.deleted_at IS NULL
+                   AND (?1 = '' OR lower(m.name) LIKE ?2 OR lower(m.generic_name) LIKE ?2)
+                   AND (?3 IS NULL OR m.category_id = ?3)
+                 GROUP BY m.id, m.name, m.generic_name, m.category_id, c.name, m.schedule, m.default_gst_rate, m.reorder_level, m.is_active
+                 HAVING (?4 = 0 OR total_stock <= m.reorder_level)
+                 ORDER BY m.name ASC",
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let rows = stmt
+            .query_map(
+                params![search, like, category_id, if low_stock_only { 1 } else { 0 }],
+                |row| {
+                    Ok(serde_json::json!({
+                        "id": row.get::<_, i64>(0)?,
+                        "name": row.get::<_, String>(1)?,
+                        "generic_name": row.get::<_, String>(2)?,
+                        "category_id": row.get::<_, Option<i64>>(3)?,
+                        "category_name": row.get::<_, Option<String>>(4)?,
+                        "schedule": row.get::<_, String>(5)?,
+                        "default_gst_rate": row.get::<_, f64>(6)?,
+                        "reorder_level": row.get::<_, i64>(7)?,
+                        "total_stock": row.get::<_, i64>(8)?,
+                        "is_active": row.get::<_, i64>(9)? == 1,
+                    }))
+                },
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let mut items = Vec::new();
+        for row in rows {
+            items.push(row.map_err(|e| AppError::Internal(e.to_string()))?);
+        }
+
+        Ok(serde_json::json!({
+            "items": items,
+            "total": items.len(),
+        }))
+    }
+
+    pub fn inventory_get_low_stock(&self) -> Result<serde_json::Value, AppError> {
+        let payload = self.inventory_get_stock(&serde_json::json!({ "low_stock": true }))?;
+        Ok(payload
+            .get("items")
+            .cloned()
+            .unwrap_or_else(|| serde_json::Value::Array(vec![])))
+    }
+
+    pub fn inventory_get_expiry_list(&self, within_days: i64) -> Result<serde_json::Value, AppError> {
+        let conn = self.connection()?;
+        let days = within_days.max(1);
+
+        let mut stmt = conn
+            .prepare(
+                "SELECT
+                    b.id,
+                    b.medicine_id,
+                    m.name,
+                    b.batch_number,
+                    b.barcode,
+                    b.expiry_date,
+                    b.purchase_price,
+                    b.selling_price,
+                    b.quantity_in,
+                    b.quantity_sold,
+                    b.quantity_adjusted,
+                    (b.quantity_in - b.quantity_sold - b.quantity_adjusted) AS quantity_on_hand,
+                    b.rack_location,
+                    b.supplier_id,
+                    s.name
+                 FROM batches b
+                 JOIN medicines m ON m.id = b.medicine_id
+                 LEFT JOIN suppliers s ON s.id = b.supplier_id
+                 WHERE b.is_active = 1
+                   AND m.deleted_at IS NULL
+                   AND (b.quantity_in - b.quantity_sold - b.quantity_adjusted) > 0
+                   AND date(b.expiry_date) <= date('now', '+' || ?1 || ' days')
+                 ORDER BY date(b.expiry_date) ASC, m.name ASC",
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let rows = stmt
+            .query_map(params![days], |row| {
+                Ok(serde_json::json!({
+                    "id": row.get::<_, i64>(0)?,
+                    "medicine_id": row.get::<_, i64>(1)?,
+                    "medicine_name": row.get::<_, String>(2)?,
+                    "batch_number": row.get::<_, String>(3)?,
+                    "barcode": row.get::<_, Option<String>>(4)?,
+                    "expiry_date": row.get::<_, String>(5)?,
+                    "purchase_price": row.get::<_, f64>(6)?,
+                    "selling_price": row.get::<_, f64>(7)?,
+                    "quantity_in": row.get::<_, i64>(8)?,
+                    "quantity_sold": row.get::<_, i64>(9)?,
+                    "quantity_adjusted": row.get::<_, i64>(10)?,
+                    "quantity_on_hand": row.get::<_, i64>(11)?,
+                    "rack_location": row.get::<_, Option<String>>(12)?,
+                    "supplier_id": row.get::<_, Option<i64>>(13)?,
+                    "supplier_name": row.get::<_, Option<String>>(14)?,
+                    "is_active": true,
+                }))
+            })
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let mut items = Vec::new();
+        for row in rows {
+            items.push(row.map_err(|e| AppError::Internal(e.to_string()))?);
+        }
+
+        Ok(serde_json::Value::Array(items))
+    }
+
+    pub fn inventory_adjust_stock(
+        &self,
+        batch_id: i64,
+        quantity: i64,
+        adjustment_type: &str,
+        reason: &str,
+        user_id: i64,
+    ) -> Result<(), AppError> {
+        if quantity == 0 {
+            return Err(AppError::Validation("Quantity must be non-zero.".to_string()));
+        }
+        if reason.trim().is_empty() {
+            return Err(AppError::Validation("Reason is required for stock adjustment.".to_string()));
+        }
+
+        let mut conn = self.connection()?;
+        let tx = conn.transaction().map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let current_on_hand: i64 = tx
+            .query_row(
+                "SELECT (quantity_in - quantity_sold - quantity_adjusted) FROM batches WHERE id = ?1 AND is_active = 1",
+                params![batch_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|e| AppError::Internal(e.to_string()))?
+            .ok_or_else(|| AppError::Validation("Batch not found.".to_string()))?;
+
+        let after = current_on_hand - quantity;
+        if after < 0 {
+            return Err(AppError::Validation(
+                "Adjustment would result in negative stock.".to_string(),
+            ));
+        }
+
+        tx.execute(
+            "UPDATE batches
+             SET quantity_adjusted = quantity_adjusted + ?1,
+                 updated_at = ?2
+             WHERE id = ?3",
+            params![quantity, chrono::Utc::now().to_rfc3339(), batch_id],
+        )
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        tx.execute(
+            "INSERT INTO stock_adjustments (batch_id, adjustment_type, quantity, reason, created_by)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![batch_id, adjustment_type.trim(), quantity, reason.trim(), user_id],
+        )
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        tx.commit().map_err(|e| AppError::Internal(e.to_string()))?;
+
+        self.write_audit_log(
+            "STOCK_ADJUSTED",
+            "inventory",
+            &batch_id.to_string(),
+            None,
+            Some(
+                &serde_json::json!({
+                    "adjustment_type": adjustment_type,
+                    "quantity": quantity,
+                    "reason": reason,
+                })
+                .to_string(),
+            ),
+            &format!("user:{}", user_id),
+        )?;
+
+        Ok(())
+    }
+
     fn connection(&self) -> Result<Connection, AppError> {
         let conn = Connection::open(&self.db_path).map_err(|e| AppError::Internal(e.to_string()))?;
         conn.execute_batch(
