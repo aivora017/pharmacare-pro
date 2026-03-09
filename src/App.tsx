@@ -13,6 +13,8 @@ import CustomersPage from '@/pages/Customers'
 import DoctorsPage from '@/pages/Doctors'
 import SuppliersPage from '@/pages/Suppliers'
 import SettingsPage from '@/pages/Settings'
+import ExpiryPage from '@/pages/Expiry'
+import BarcodesPage from '@/pages/Barcodes'
 import { ModulePlaceholderPage } from '@/pages/ModulePlaceholder'
 
 void useNavigate
@@ -51,6 +53,8 @@ function ProtectedLayout() {
             <Route path="/customers" element={<CustomersPage />} />
             <Route path="/doctors" element={<DoctorsPage />} />
             <Route path="/suppliers" element={<SuppliersPage />} />
+            <Route path="/expiry" element={<ExpiryPage />} />
+            <Route path="/barcodes" element={<BarcodesPage />} />
             <Route
               path="/reports"
               element={

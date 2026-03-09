@@ -101,7 +101,7 @@
 - [x] Expiry dashboard (list all batches by expiry, colour-coded)
 - [x] Barcode scan in Expiry mode → show full batch details
 - [x] Build expiry return list (scan multiple → create return note)
-- [ ] Barcode generator (bulk generate for selected batches)
+- [x] Barcode generator (bulk generate for selected batches)
 - [ ] Label template designer (size, fields to print)
 - [ ] Print to barcode printer (Zebra ZPL commands)
 - [ ] Print queue management

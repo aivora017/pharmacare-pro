@@ -3,8 +3,8 @@ use crate::commands::billing::CreateBillInput;
 use crate::commands::customer::DoctorCreateInput;
 use crate::commands::medicine::{BatchDto, CategoryDto, MedicineDetailDto, MedicineDto};
 use crate::commands::purchase::PurchaseBillCreateInput;
-use crate::commands::purchase::PurchaseOrderCreateInput;
 use crate::commands::purchase::PurchaseReturnCreateInput;
+use crate::commands::purchase::PurchaseOrderCreateInput;
 use crate::commands::purchase::SupplierInput;
 use crate::error::AppError;
 use bcrypt::{hash, DEFAULT_COST};
@@ -226,15 +226,11 @@ impl Database {
 
     pub fn create_bill(&self, input: &CreateBillInput) -> Result<i64, AppError> {
         if input.items.is_empty() {
-            return Err(AppError::Validation(
-                "Bill must contain at least one item.".to_string(),
-            ));
+            return Err(AppError::Validation("Bill must contain at least one item.".to_string()));
         }
 
         if input.payments.is_empty() {
-            return Err(AppError::Validation(
-                "At least one payment entry is required.".to_string(),
-            ));
+            return Err(AppError::Validation("At least one payment entry is required.".to_string()));
         }
 
         let mut conn = self.connection()?;
@@ -280,29 +276,17 @@ impl Database {
             .iter()
             .map(|item| item.unit_price * item.quantity as f64)
             .sum::<f64>();
-        let item_discount = input
-            .items
-            .iter()
-            .map(|item| item.discount_amount)
-            .sum::<f64>();
+        let item_discount = input.items.iter().map(|item| item.discount_amount).sum::<f64>();
         let discount_amount = input.discount_amount.unwrap_or(0.0);
         let taxable_amount = subtotal - item_discount - discount_amount;
         let cgst_amount = input.items.iter().map(|item| item.cgst_amount).sum::<f64>();
         let sgst_amount = input.items.iter().map(|item| item.sgst_amount).sum::<f64>();
         let igst_amount = input.items.iter().map(|item| item.igst_amount).sum::<f64>();
-        let total_amount = input
-            .items
-            .iter()
-            .map(|item| item.total_amount)
-            .sum::<f64>();
+        let total_amount = input.items.iter().map(|item| item.total_amount).sum::<f64>();
         let round_off = (total_amount.round() * 100.0 - total_amount * 100.0).round() / 100.0;
         let net_amount = total_amount + round_off;
 
-        let amount_paid = input
-            .payments
-            .iter()
-            .map(|payment| payment.amount)
-            .sum::<f64>();
+        let amount_paid = input.payments.iter().map(|payment| payment.amount).sum::<f64>();
         let change_returned = if amount_paid > net_amount {
             amount_paid - net_amount
         } else {
@@ -457,12 +441,7 @@ impl Database {
                      loyalty_points = loyalty_points + ?2 - ?3,
                      updated_at = datetime('now')
                  WHERE id = ?4",
-                params![
-                    outstanding,
-                    loyalty_points_earned,
-                    loyalty_points_redeemed,
-                    customer_id
-                ],
+                params![outstanding, loyalty_points_earned, loyalty_points_redeemed, customer_id],
             )
             .map_err(|e| AppError::Internal(e.to_string()))?;
         }
@@ -507,8 +486,7 @@ impl Database {
             .unwrap_or("Held Bill");
 
         let created_by = input.get("created_by").and_then(|value| value.as_i64());
-        let cart_data =
-            serde_json::to_string(input).map_err(|e| AppError::Internal(e.to_string()))?;
+        let cart_data = serde_json::to_string(input).map_err(|e| AppError::Internal(e.to_string()))?;
 
         conn.execute(
             "INSERT INTO held_bills (label, cart_data, created_by) VALUES (?1, ?2, ?3)",
@@ -563,11 +541,8 @@ impl Database {
             .map_err(|e| AppError::Internal(e.to_string()))?
             .ok_or_else(|| AppError::Validation("Held bill not found.".to_string()))?;
 
-        tx.execute(
-            "DELETE FROM held_bills WHERE id = ?1",
-            params![held_bill_id],
-        )
-        .map_err(|e| AppError::Internal(e.to_string()))?;
+        tx.execute("DELETE FROM held_bills WHERE id = ?1", params![held_bill_id])
+            .map_err(|e| AppError::Internal(e.to_string()))?;
         tx.commit().map_err(|e| AppError::Internal(e.to_string()))?;
 
         let payload: serde_json::Value =
@@ -710,11 +685,7 @@ impl Database {
         let conn = self.connection()?;
         let status = filters.get("status").and_then(|v| v.as_str());
         let customer_id = filters.get("customer_id").and_then(|v| v.as_i64());
-        let page = filters
-            .get("page")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(1)
-            .max(1);
+        let page = filters.get("page").and_then(|v| v.as_i64()).unwrap_or(1).max(1);
         let page_size = filters
             .get("page_size")
             .and_then(|v| v.as_i64())
@@ -809,9 +780,7 @@ impl Database {
             .ok_or_else(|| AppError::Validation("Bill not found.".to_string()))?;
 
         if status != "active" {
-            return Err(AppError::Validation(
-                "Only active bills can be cancelled.".to_string(),
-            ));
+            return Err(AppError::Validation("Only active bills can be cancelled.".to_string()));
         }
 
         let mut bill_items: Vec<(i64, i64)> = Vec::new();
@@ -961,17 +930,11 @@ impl Database {
     ) -> Result<i64, AppError> {
         let clean_name = name.trim();
         if clean_name.is_empty() {
-            return Err(AppError::Validation(
-                "Customer name is required.".to_string(),
-            ));
+            return Err(AppError::Validation("Customer name is required.".to_string()));
         }
 
-        let clean_phone = phone
-            .map(|value| value.trim())
-            .filter(|value| !value.is_empty());
-        let clean_email = email
-            .map(|value| value.trim())
-            .filter(|value| !value.is_empty());
+        let clean_phone = phone.map(|value| value.trim()).filter(|value| !value.is_empty());
+        let clean_email = email.map(|value| value.trim()).filter(|value| !value.is_empty());
 
         let conn = self.connection()?;
         conn.execute(
@@ -1019,12 +982,8 @@ impl Database {
              WHERE c.id = ?1",
             params![id],
             |row| {
-                let allergies_raw = row
-                    .get::<_, Option<String>>(12)?
-                    .unwrap_or_else(|| "[]".to_string());
-                let chronic_raw = row
-                    .get::<_, Option<String>>(13)?
-                    .unwrap_or_else(|| "[]".to_string());
+                let allergies_raw = row.get::<_, Option<String>>(12)?.unwrap_or_else(|| "[]".to_string());
+                let chronic_raw = row.get::<_, Option<String>>(13)?.unwrap_or_else(|| "[]".to_string());
 
                 let allergies = serde_json::from_str::<serde_json::Value>(&allergies_raw)
                     .unwrap_or_else(|_| serde_json::json!([]));
@@ -1061,12 +1020,7 @@ impl Database {
         .ok_or_else(|| AppError::Validation("Customer not found.".to_string()))
     }
 
-    pub fn customer_update(
-        &self,
-        id: i64,
-        data: &serde_json::Value,
-        user_id: i64,
-    ) -> Result<(), AppError> {
+    pub fn customer_update(&self, id: i64, data: &serde_json::Value, user_id: i64) -> Result<(), AppError> {
         let current = self.customer_get(id)?;
 
         let current_name = current.get("name").and_then(|v| v.as_str()).unwrap_or("");
@@ -1078,9 +1032,7 @@ impl Database {
             .to_string();
 
         if name.is_empty() {
-            return Err(AppError::Validation(
-                "Customer name is required.".to_string(),
-            ));
+            return Err(AppError::Validation("Customer name is required.".to_string()));
         }
 
         let pick_string = |key: &str| -> Option<String> {
@@ -1194,11 +1146,7 @@ impl Database {
         Ok(())
     }
 
-    pub fn customer_get_history(
-        &self,
-        customer_id: i64,
-        limit: i64,
-    ) -> Result<serde_json::Value, AppError> {
+    pub fn customer_get_history(&self, customer_id: i64, limit: i64) -> Result<serde_json::Value, AppError> {
         let conn = self.connection()?;
         let safe_limit = limit.clamp(1, 500);
 
@@ -1246,9 +1194,7 @@ impl Database {
         user_id: i64,
     ) -> Result<(), AppError> {
         if amount <= 0.0 {
-            return Err(AppError::Validation(
-                "Payment amount must be greater than zero.".to_string(),
-            ));
+            return Err(AppError::Validation("Payment amount must be greater than zero.".to_string()));
         }
 
         let conn = self.connection()?;
@@ -1263,9 +1209,7 @@ impl Database {
             .ok_or_else(|| AppError::Validation("Customer not found.".to_string()))?;
 
         if current_outstanding <= 0.0 {
-            return Err(AppError::Validation(
-                "Customer has no outstanding balance.".to_string(),
-            ));
+            return Err(AppError::Validation("Customer has no outstanding balance.".to_string()));
         }
 
         let applied = amount.min(current_outstanding);
@@ -1364,25 +1308,17 @@ impl Database {
             "doctor",
             &doctor_id.to_string(),
             None,
-            Some(
-                &serde_json::json!({
-                    "name": name,
-                    "registration_no": data.registration_no,
-                })
-                .to_string(),
-            ),
+            Some(&serde_json::json!({
+                "name": name,
+                "registration_no": data.registration_no,
+            }).to_string()),
             &format!("user:{}", user_id),
         )?;
 
         Ok(doctor_id)
     }
 
-    pub fn doctor_update(
-        &self,
-        id: i64,
-        data: &serde_json::Value,
-        user_id: i64,
-    ) -> Result<(), AppError> {
+    pub fn doctor_update(&self, id: i64, data: &serde_json::Value, user_id: i64) -> Result<(), AppError> {
         let conn = self.connection()?;
 
         let current = conn.query_row(
@@ -1527,28 +1463,18 @@ impl Database {
         Ok(serde_json::Value::Array(items))
     }
 
-    pub fn purchase_create_bill(
-        &self,
-        data: &PurchaseBillCreateInput,
-        user_id: i64,
-    ) -> Result<i64, AppError> {
+    pub fn purchase_create_bill(&self, data: &PurchaseBillCreateInput, user_id: i64) -> Result<i64, AppError> {
         let bill_number = data.bill_number.trim();
         if bill_number.is_empty() {
-            return Err(AppError::Validation(
-                "Purchase bill number is required.".to_string(),
-            ));
+            return Err(AppError::Validation("Purchase bill number is required.".to_string()));
         }
         if data.total_amount <= 0.0 {
-            return Err(AppError::Validation(
-                "Total amount must be greater than zero.".to_string(),
-            ));
+            return Err(AppError::Validation("Total amount must be greater than zero.".to_string()));
         }
 
         let amount_paid = data.amount_paid.unwrap_or(0.0);
         if amount_paid < 0.0 {
-            return Err(AppError::Validation(
-                "Amount paid cannot be negative.".to_string(),
-            ));
+            return Err(AppError::Validation("Amount paid cannot be negative.".to_string()));
         }
 
         let payment_status = if amount_paid <= 0.0 {
@@ -1589,10 +1515,7 @@ impl Database {
                 data.total_amount,
                 amount_paid,
                 payment_status,
-                data.notes
-                    .as_ref()
-                    .map(|v| v.trim())
-                    .filter(|v| !v.is_empty()),
+                data.notes.as_ref().map(|v| v.trim()).filter(|v| !v.is_empty()),
                 user_id,
             ],
         )
@@ -1605,12 +1528,7 @@ impl Database {
              SET outstanding_balance = outstanding_balance + (?1 - ?2),
                  updated_at = ?3
              WHERE id = ?4",
-            params![
-                data.total_amount,
-                amount_paid,
-                chrono::Utc::now().to_rfc3339(),
-                data.supplier_id
-            ],
+            params![data.total_amount, amount_paid, chrono::Utc::now().to_rfc3339(), data.supplier_id],
         )
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
@@ -1634,16 +1552,10 @@ impl Database {
         Ok(bill_id)
     }
 
-    pub fn purchase_create_po(
-        &self,
-        data: &PurchaseOrderCreateInput,
-        user_id: i64,
-    ) -> Result<i64, AppError> {
+    pub fn purchase_create_po(&self, data: &PurchaseOrderCreateInput, user_id: i64) -> Result<i64, AppError> {
         let po_number = data.po_number.trim();
         if po_number.is_empty() {
-            return Err(AppError::Validation(
-                "Purchase order number is required.".to_string(),
-            ));
+            return Err(AppError::Validation("Purchase order number is required.".to_string()));
         }
 
         let conn = self.connection()?;
@@ -1672,14 +1584,8 @@ impl Database {
             params![
                 po_number,
                 data.supplier_id,
-                data.expected_by
-                    .as_ref()
-                    .map(|v| v.trim())
-                    .filter(|v| !v.is_empty()),
-                data.notes
-                    .as_ref()
-                    .map(|v| v.trim())
-                    .filter(|v| !v.is_empty()),
+                data.expected_by.as_ref().map(|v| v.trim()).filter(|v| !v.is_empty()),
+                data.notes.as_ref().map(|v| v.trim()).filter(|v| !v.is_empty()),
                 total_amount,
                 user_id,
             ],
@@ -1740,17 +1646,11 @@ impl Database {
         .ok_or_else(|| AppError::Validation("Purchase bill not found.".to_string()))
     }
 
-    pub fn purchase_list_bills(
-        &self,
-        filters: &serde_json::Value,
-    ) -> Result<serde_json::Value, AppError> {
+    pub fn purchase_list_bills(&self, filters: &serde_json::Value) -> Result<serde_json::Value, AppError> {
         let conn = self.connection()?;
 
         let supplier_id = filters.get("supplier_id").and_then(|v| v.as_i64());
-        let payment_status = filters
-            .get("payment_status")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let payment_status = filters.get("payment_status").and_then(|v| v.as_str()).unwrap_or("");
 
         let mut stmt = conn
             .prepare(
@@ -1797,30 +1697,20 @@ impl Database {
         }))
     }
 
-    pub fn purchase_create_supplier(
-        &self,
-        data: &SupplierInput,
-        user_id: i64,
-    ) -> Result<i64, AppError> {
+    pub fn purchase_create_supplier(&self, data: &SupplierInput, user_id: i64) -> Result<i64, AppError> {
         let name = data.name.trim();
         if name.is_empty() {
-            return Err(AppError::Validation(
-                "Supplier name is required.".to_string(),
-            ));
+            return Err(AppError::Validation("Supplier name is required.".to_string()));
         }
 
         let payment_terms = data.payment_terms.unwrap_or(30);
         if payment_terms < 0 {
-            return Err(AppError::Validation(
-                "Payment terms cannot be negative.".to_string(),
-            ));
+            return Err(AppError::Validation("Payment terms cannot be negative.".to_string()));
         }
 
         let credit_limit = data.credit_limit.unwrap_or(0.0);
         if credit_limit < 0.0 {
-            return Err(AppError::Validation(
-                "Credit limit cannot be negative.".to_string(),
-            ));
+            return Err(AppError::Validation("Credit limit cannot be negative.".to_string()));
         }
 
         let reliability_score = data.reliability_score.unwrap_or(50.0).clamp(0.0, 100.0);
@@ -1834,34 +1724,13 @@ impl Database {
              ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 name,
-                data.contact_person
-                    .as_ref()
-                    .map(|v| v.trim())
-                    .filter(|v| !v.is_empty()),
-                data.phone
-                    .as_ref()
-                    .map(|v| v.trim())
-                    .filter(|v| !v.is_empty()),
-                data.email
-                    .as_ref()
-                    .map(|v| v.trim())
-                    .filter(|v| !v.is_empty()),
-                data.email_domain
-                    .as_ref()
-                    .map(|v| v.trim().to_lowercase())
-                    .filter(|v| !v.is_empty()),
-                data.gstin
-                    .as_ref()
-                    .map(|v| v.trim())
-                    .filter(|v| !v.is_empty()),
-                data.drug_licence_no
-                    .as_ref()
-                    .map(|v| v.trim())
-                    .filter(|v| !v.is_empty()),
-                data.drug_licence_expiry
-                    .as_ref()
-                    .map(|v| v.trim())
-                    .filter(|v| !v.is_empty()),
+                data.contact_person.as_ref().map(|v| v.trim()).filter(|v| !v.is_empty()),
+                data.phone.as_ref().map(|v| v.trim()).filter(|v| !v.is_empty()),
+                data.email.as_ref().map(|v| v.trim()).filter(|v| !v.is_empty()),
+                data.email_domain.as_ref().map(|v| v.trim().to_lowercase()).filter(|v| !v.is_empty()),
+                data.gstin.as_ref().map(|v| v.trim()).filter(|v| !v.is_empty()),
+                data.drug_licence_no.as_ref().map(|v| v.trim()).filter(|v| !v.is_empty()),
+                data.drug_licence_expiry.as_ref().map(|v| v.trim()).filter(|v| !v.is_empty()),
                 payment_terms,
                 credit_limit,
                 reliability_score,
@@ -1945,9 +1814,7 @@ impl Database {
 
         let name = pick_string("name").unwrap_or_default();
         if name.is_empty() {
-            return Err(AppError::Validation(
-                "Supplier name is required.".to_string(),
-            ));
+            return Err(AppError::Validation("Supplier name is required.".to_string()));
         }
 
         let payment_terms = data
@@ -1956,9 +1823,7 @@ impl Database {
             .or_else(|| current.get("payment_terms").and_then(|v| v.as_i64()))
             .unwrap_or(30);
         if payment_terms < 0 {
-            return Err(AppError::Validation(
-                "Payment terms cannot be negative.".to_string(),
-            ));
+            return Err(AppError::Validation("Payment terms cannot be negative.".to_string()));
         }
 
         let credit_limit = data
@@ -1967,9 +1832,7 @@ impl Database {
             .or_else(|| current.get("credit_limit").and_then(|v| v.as_f64()))
             .unwrap_or(0.0);
         if credit_limit < 0.0 {
-            return Err(AppError::Validation(
-                "Credit limit cannot be negative.".to_string(),
-            ));
+            return Err(AppError::Validation("Credit limit cannot be negative.".to_string()));
         }
 
         let reliability_score = data
@@ -2037,27 +1900,17 @@ impl Database {
         Ok(())
     }
 
-    pub fn purchase_create_return(
-        &self,
-        data: &PurchaseReturnCreateInput,
-        user_id: i64,
-    ) -> Result<i64, AppError> {
+    pub fn purchase_create_return(&self, data: &PurchaseReturnCreateInput, user_id: i64) -> Result<i64, AppError> {
         let debit_note_no = data.debit_note_no.trim();
         if debit_note_no.is_empty() {
-            return Err(AppError::Validation(
-                "Debit note number is required.".to_string(),
-            ));
+            return Err(AppError::Validation("Debit note number is required.".to_string()));
         }
         if data.total_amount <= 0.0 {
-            return Err(AppError::Validation(
-                "Return amount must be greater than zero.".to_string(),
-            ));
+            return Err(AppError::Validation("Return amount must be greater than zero.".to_string()));
         }
 
         let mut conn = self.connection()?;
-        let tx = conn
-            .transaction()
-            .map_err(|e| AppError::Internal(e.to_string()))?;
+        let tx = conn.transaction().map_err(|e| AppError::Internal(e.to_string()))?;
 
         let supplier_outstanding: f64 = tx
             .query_row(
@@ -2094,11 +1947,7 @@ impl Database {
              SET outstanding_balance = ?1,
                  updated_at = ?2
              WHERE id = ?3",
-            params![
-                updated_outstanding,
-                chrono::Utc::now().to_rfc3339(),
-                data.supplier_id
-            ],
+            params![updated_outstanding, chrono::Utc::now().to_rfc3339(), data.supplier_id],
         )
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
@@ -2124,16 +1973,8 @@ impl Database {
     }
 
     pub fn email_test_connection(&self, config: &serde_json::Value) -> Result<bool, AppError> {
-        let host = config
-            .get("host")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .trim();
-        let email = config
-            .get("email")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .trim();
+        let host = config.get("host").and_then(|v| v.as_str()).unwrap_or("").trim();
+        let email = config.get("email").and_then(|v| v.as_str()).unwrap_or("").trim();
         let password = config
             .get("password")
             .and_then(|v| v.as_str())
@@ -2262,9 +2103,7 @@ impl Database {
         }
 
         if identifier.is_empty() {
-            return Err(AppError::Validation(
-                "Login identifier is required.".to_string(),
-            ));
+            return Err(AppError::Validation("Login identifier is required.".to_string()));
         }
 
         let username_taken: i64 = conn
@@ -2383,12 +2222,7 @@ impl Database {
         .map_err(|e| AppError::Internal(e.to_string()))
     }
 
-    pub fn set_setting(
-        &self,
-        key: &str,
-        value: &str,
-        user_id: Option<i64>,
-    ) -> Result<(), AppError> {
+    pub fn set_setting(&self, key: &str, value: &str, user_id: Option<i64>) -> Result<(), AppError> {
         let conn = self.connection()?;
         conn.execute(
             "INSERT INTO settings (key, value, updated_at, updated_by)
@@ -2490,23 +2324,20 @@ impl Database {
             .map_err(|e| AppError::Internal(e.to_string()))?;
 
         let rows = stmt
-            .query_map(
-                params![search, category_id, if in_stock_only { 1 } else { 0 }],
-                |row| {
-                    Ok(MedicineDto {
-                        id: row.get(0)?,
-                        name: row.get(1)?,
-                        generic_name: row.get(2)?,
-                        category_id: row.get(3)?,
-                        category_name: row.get(4)?,
-                        schedule: row.get(5)?,
-                        default_gst_rate: row.get(6)?,
-                        reorder_level: row.get(7)?,
-                        total_stock: row.get(8)?,
-                        is_active: row.get::<_, i64>(9)? == 1,
-                    })
-                },
-            )
+            .query_map(params![search, category_id, if in_stock_only { 1 } else { 0 }], |row| {
+                Ok(MedicineDto {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    generic_name: row.get(2)?,
+                    category_id: row.get(3)?,
+                    category_name: row.get(4)?,
+                    schedule: row.get(5)?,
+                    default_gst_rate: row.get(6)?,
+                    reorder_level: row.get(7)?,
+                    total_stock: row.get(8)?,
+                    is_active: row.get::<_, i64>(9)? == 1,
+                })
+            })
             .map_err(|e| AppError::Internal(e.to_string()))?;
 
         let mut medicines = Vec::new();
@@ -2847,10 +2678,7 @@ impl Database {
         Ok(())
     }
 
-    pub fn inventory_get_stock(
-        &self,
-        filters: &serde_json::Value,
-    ) -> Result<serde_json::Value, AppError> {
+    pub fn inventory_get_stock(&self, filters: &serde_json::Value) -> Result<serde_json::Value, AppError> {
         let conn = self.connection()?;
 
         let search = filters
@@ -2893,12 +2721,7 @@ impl Database {
 
         let rows = stmt
             .query_map(
-                params![
-                    search,
-                    like,
-                    category_id,
-                    if low_stock_only { 1 } else { 0 }
-                ],
+                params![search, like, category_id, if low_stock_only { 1 } else { 0 }],
                 |row| {
                     Ok(serde_json::json!({
                         "id": row.get::<_, i64>(0)?,
@@ -2935,10 +2758,7 @@ impl Database {
             .unwrap_or_else(|| serde_json::Value::Array(vec![])))
     }
 
-    pub fn inventory_get_expiry_list(
-        &self,
-        within_days: i64,
-    ) -> Result<serde_json::Value, AppError> {
+    pub fn inventory_get_expiry_list(&self, within_days: i64) -> Result<serde_json::Value, AppError> {
         let conn = self.connection()?;
         let days = within_days.max(1);
 
@@ -3011,20 +2831,14 @@ impl Database {
         user_id: i64,
     ) -> Result<(), AppError> {
         if quantity == 0 {
-            return Err(AppError::Validation(
-                "Quantity must be non-zero.".to_string(),
-            ));
+            return Err(AppError::Validation("Quantity must be non-zero.".to_string()));
         }
         if reason.trim().is_empty() {
-            return Err(AppError::Validation(
-                "Reason is required for stock adjustment.".to_string(),
-            ));
+            return Err(AppError::Validation("Reason is required for stock adjustment.".to_string()));
         }
 
         let mut conn = self.connection()?;
-        let tx = conn
-            .transaction()
-            .map_err(|e| AppError::Internal(e.to_string()))?;
+        let tx = conn.transaction().map_err(|e| AppError::Internal(e.to_string()))?;
 
         let current_on_hand: i64 = tx
             .query_row(
@@ -3080,9 +2894,177 @@ impl Database {
         Ok(())
     }
 
+    pub fn barcode_generate_for_batch(&self, batch_id: i64) -> Result<String, AppError> {
+        let conn = self.connection()?;
+
+        let row = conn
+            .query_row(
+                "SELECT medicine_id, batch_number, barcode
+                 FROM batches
+                 WHERE id = ?1 AND is_active = 1",
+                params![batch_id],
+                |r| {
+                    Ok((
+                        r.get::<_, i64>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, Option<String>>(2)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|e| AppError::Internal(e.to_string()))?
+            .ok_or_else(|| AppError::Validation("Batch not found.".to_string()))?;
+
+        if let Some(existing) = row.2 {
+            let clean = existing.trim();
+            if !clean.is_empty() {
+                return Ok(clean.to_string());
+            }
+        }
+
+        let barcode = format!(
+            "MED{:05}-{}",
+            row.0,
+            row.1
+                .chars()
+                .filter(|c| c.is_ascii_alphanumeric())
+                .collect::<String>()
+                .to_uppercase()
+        );
+
+        conn.execute(
+            "UPDATE batches SET barcode = ?1, updated_at = ?2 WHERE id = ?3",
+            params![barcode, chrono::Utc::now().to_rfc3339(), batch_id],
+        )
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        self.write_audit_log(
+            "BARCODE_GENERATED",
+            "barcode",
+            &batch_id.to_string(),
+            None,
+            Some(&serde_json::json!({ "barcode": barcode }).to_string()),
+            "system",
+        )?;
+
+        Ok(barcode)
+    }
+
+    pub fn barcode_generate_bulk(&self, batch_ids: &[i64]) -> Result<serde_json::Value, AppError> {
+        let conn = self.connection()?;
+
+        let mut candidates: Vec<(i64, i64, String, Option<String>)> = Vec::new();
+        if batch_ids.is_empty() {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, medicine_id, batch_number, barcode
+                     FROM batches
+                     WHERE is_active = 1 AND (barcode IS NULL OR trim(barcode) = '')
+                     ORDER BY id ASC",
+                )
+                .map_err(|e| AppError::Internal(e.to_string()))?;
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                    ))
+                })
+                .map_err(|e| AppError::Internal(e.to_string()))?;
+            for row in rows {
+                candidates.push(row.map_err(|e| AppError::Internal(e.to_string()))?);
+            }
+        } else {
+            let placeholders = (0..batch_ids.len()).map(|_| "?").collect::<Vec<_>>().join(",");
+            let sql = format!(
+                "SELECT id, medicine_id, batch_number, barcode
+                 FROM batches
+                 WHERE is_active = 1 AND id IN ({})
+                 ORDER BY id ASC",
+                placeholders
+            );
+            let mut stmt = conn.prepare(&sql).map_err(|e| AppError::Internal(e.to_string()))?;
+            let rows = stmt
+                .query_map(rusqlite::params_from_iter(batch_ids.iter()), |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                    ))
+                })
+                .map_err(|e| AppError::Internal(e.to_string()))?;
+            for row in rows {
+                candidates.push(row.map_err(|e| AppError::Internal(e.to_string()))?);
+            }
+        }
+
+        let mut generated = Vec::new();
+        for (batch_id, medicine_id, batch_number, existing) in candidates {
+            let barcode = if let Some(existing_value) = existing {
+                let clean = existing_value.trim();
+                if !clean.is_empty() {
+                    clean.to_string()
+                } else {
+                    format!(
+                        "MED{:05}-{}",
+                        medicine_id,
+                        batch_number
+                            .chars()
+                            .filter(|c| c.is_ascii_alphanumeric())
+                            .collect::<String>()
+                            .to_uppercase()
+                    )
+                }
+            } else {
+                format!(
+                    "MED{:05}-{}",
+                    medicine_id,
+                    batch_number
+                        .chars()
+                        .filter(|c| c.is_ascii_alphanumeric())
+                        .collect::<String>()
+                        .to_uppercase()
+                )
+            };
+
+            conn.execute(
+                "UPDATE batches SET barcode = ?1, updated_at = ?2 WHERE id = ?3",
+                params![barcode, chrono::Utc::now().to_rfc3339(), batch_id],
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+            generated.push(serde_json::json!({
+                "batch_id": batch_id,
+                "barcode": barcode,
+            }));
+        }
+
+        self.write_audit_log(
+            "BARCODE_BULK_GENERATED",
+            "barcode",
+            "bulk",
+            None,
+            Some(
+                &serde_json::json!({
+                    "requested": batch_ids.len(),
+                    "generated": generated.len(),
+                })
+                .to_string(),
+            ),
+            "system",
+        )?;
+
+        Ok(serde_json::json!({
+            "items": generated,
+            "total": generated.len(),
+        }))
+    }
+
     fn connection(&self) -> Result<Connection, AppError> {
-        let conn =
-            Connection::open(&self.db_path).map_err(|e| AppError::Internal(e.to_string()))?;
+        let conn = Connection::open(&self.db_path).map_err(|e| AppError::Internal(e.to_string()))?;
         conn.execute_batch(
             "
             PRAGMA foreign_keys = ON;
@@ -3162,8 +3144,8 @@ impl Database {
             .map_err(|e| AppError::Internal(e.to_string()))?;
 
         if user_count == 0 {
-            let default_hash =
-                hash("admin123", DEFAULT_COST).map_err(|e| AppError::Internal(e.to_string()))?;
+            let default_hash = hash("admin123", DEFAULT_COST)
+                .map_err(|e| AppError::Internal(e.to_string()))?;
 
             conn.execute(
                 "INSERT INTO users (name, email, role_id, password_hash, is_active, login_attempts)
@@ -3178,19 +3160,10 @@ impl Database {
             .map_err(|e| AppError::Internal(e.to_string()))?;
 
         if category_count == 0 {
-            let defaults = [
-                "General",
-                "Antibiotic",
-                "Diabetes",
-                "Cardiac",
-                "Pain Relief",
-            ];
+            let defaults = ["General", "Antibiotic", "Diabetes", "Cardiac", "Pain Relief"];
             for category in defaults {
-                conn.execute(
-                    "INSERT INTO categories (name) VALUES (?1)",
-                    params![category],
-                )
-                .map_err(|e| AppError::Internal(e.to_string()))?;
+                conn.execute("INSERT INTO categories (name) VALUES (?1)", params![category])
+                    .map_err(|e| AppError::Internal(e.to_string()))?;
             }
         }
 
