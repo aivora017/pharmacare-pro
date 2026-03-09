@@ -22,9 +22,7 @@ pub async fn settings_set(
 }
 
 #[tauri::command]
-pub async fn settings_get_all(
-    state: State<'_, AppState>,
-) -> Result<serde_json::Value, AppError> {
+pub async fn settings_get_all(state: State<'_, AppState>) -> Result<serde_json::Value, AppError> {
     let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
     db.list_settings()
 }

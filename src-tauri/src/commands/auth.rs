@@ -11,8 +11,8 @@
 // - Session tokens stored in OS keychain (not in database or local files)
 // ============================================================
 
-use crate::AppState;
 use crate::error::AppError;
+use crate::AppState;
 use bcrypt::{hash, verify, DEFAULT_COST};
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
@@ -76,7 +76,8 @@ pub async fn auth_login(
 
     // Fetch user — return same generic error for both "not found" and "wrong password"
     // to prevent email enumeration attacks
-    let user = db.get_user_by_email(&email)
+    let user = db
+        .get_user_by_email(&email)
         .map_err(|_| AppError::InvalidCredentials)?;
 
     // Check if account is active
@@ -93,24 +94,28 @@ pub async fn auth_login(
     }
 
     // Verify password
-    let password_valid = verify(&password, &user.password_hash)
-        .map_err(|_| AppError::InvalidCredentials)?;
+    let password_valid =
+        verify(&password, &user.password_hash).map_err(|_| AppError::InvalidCredentials)?;
 
     if !password_valid {
         // Increment failed attempts
         let new_attempts = user.login_attempts + 1;
         let locked_until = if new_attempts >= 5 {
             // Lock for 30 minutes
-            Some(
-                (chrono::Utc::now() + chrono::Duration::minutes(30))
-                    .to_rfc3339()
-            )
+            Some((chrono::Utc::now() + chrono::Duration::minutes(30)).to_rfc3339())
         } else {
             None
         };
 
         db.update_login_attempts(user.id, new_attempts, locked_until.as_deref())?;
-        db.write_audit_log("LOGIN_FAILED", "auth", &user.id.to_string(), None, None, &user.name)?;
+        db.write_audit_log(
+            "LOGIN_FAILED",
+            "auth",
+            &user.id.to_string(),
+            None,
+            None,
+            &user.name,
+        )?;
 
         return Err(AppError::InvalidCredentials);
     }
@@ -132,7 +137,14 @@ pub async fn auth_login(
     db.set_setting("session_token", &token, Some(user.id))?;
 
     // Write audit log
-    db.write_audit_log("LOGIN", "auth", &user.id.to_string(), None, None, &user.name)?;
+    db.write_audit_log(
+        "LOGIN",
+        "auth",
+        &user.id.to_string(),
+        None,
+        None,
+        &user.name,
+    )?;
 
     Ok(AuthResult {
         user: UserDto {
@@ -158,10 +170,7 @@ pub async fn auth_login(
 /// 3. Remove token from OS keychain
 /// 4. Write audit_log: action='LOGOUT'
 #[tauri::command]
-pub async fn auth_logout(
-    state: State<'_, AppState>,
-    token: String,
-) -> Result<(), AppError> {
+pub async fn auth_logout(state: State<'_, AppState>, token: String) -> Result<(), AppError> {
     let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
     let jti = extract_jti(&token)?;
     db.revoke_session(&jti)?;
@@ -192,7 +201,7 @@ pub async fn auth_restore_session(
     // Validate token
     let claims = match validate_jwt(&token) {
         Ok(c) => c,
-        Err(_) => return Ok(None),  // Expired or invalid — silent fail
+        Err(_) => return Ok(None), // Expired or invalid — silent fail
     };
 
     // Check session is not revoked
@@ -246,8 +255,8 @@ pub async fn auth_change_password(
     let user = db.get_user(user_id)?;
 
     // Verify current password
-    let valid = verify(&current_password, &user.password_hash)
-        .map_err(|_| AppError::InvalidCredentials)?;
+    let valid =
+        verify(&current_password, &user.password_hash).map_err(|_| AppError::InvalidCredentials)?;
     if !valid {
         return Err(AppError::InvalidCredentials);
     }
@@ -256,12 +265,19 @@ pub async fn auth_change_password(
     validate_password_strength(&new_password)?;
 
     // Hash new password
-    let new_hash = hash(&new_password, DEFAULT_COST)
-        .map_err(|e| AppError::Internal(e.to_string()))?;
+    let new_hash =
+        hash(&new_password, DEFAULT_COST).map_err(|e| AppError::Internal(e.to_string()))?;
 
     db.update_password(user_id, &new_hash)?;
     db.revoke_all_sessions(user_id)?;
-    db.write_audit_log("PASSWORD_CHANGE", "auth", &user_id.to_string(), None, None, &user.name)?;
+    db.write_audit_log(
+        "PASSWORD_CHANGE",
+        "auth",
+        &user_id.to_string(),
+        None,
+        None,
+        &user.name,
+    )?;
 
     Ok(())
 }
@@ -282,13 +298,17 @@ pub async fn auth_create_user(
 
     validate_password_strength(&password)?;
 
-    let password_hash = hash(&password, DEFAULT_COST)
-        .map_err(|e| AppError::Internal(e.to_string()))?;
+    let password_hash =
+        hash(&password, DEFAULT_COST).map_err(|e| AppError::Internal(e.to_string()))?;
 
     let user_id = db.create_user(&name, &email.to_lowercase(), &password_hash, role_id)?;
-    db.write_audit_log("USER_CREATED", "users", &user_id.to_string(), None,
+    db.write_audit_log(
+        "USER_CREATED",
+        "users",
+        &user_id.to_string(),
+        None,
         Some(&serde_json::json!({ "name": name, "email": email, "role_id": role_id }).to_string()),
-        "System"
+        "System",
     )?;
 
     Ok(user_id)
@@ -296,9 +316,7 @@ pub async fn auth_create_user(
 
 /// List all active users (admin only).
 #[tauri::command]
-pub async fn auth_list_users(
-    state: State<'_, AppState>,
-) -> Result<Vec<UserDto>, AppError> {
+pub async fn auth_list_users(state: State<'_, AppState>) -> Result<Vec<UserDto>, AppError> {
     let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
     db.list_users()
 }
@@ -315,7 +333,14 @@ pub async fn auth_update_user(
 ) -> Result<(), AppError> {
     let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
     db.update_user(user_id, &name, role_id, is_active)?;
-    db.write_audit_log("USER_UPDATED", "users", &user_id.to_string(), None, None, "Admin")?;
+    db.write_audit_log(
+        "USER_UPDATED",
+        "users",
+        &user_id.to_string(),
+        None,
+        None,
+        "Admin",
+    )?;
     Ok(())
 }
 
@@ -324,14 +349,14 @@ pub async fn auth_update_user(
 fn validate_password_strength(password: &str) -> Result<(), AppError> {
     if password.len() < 8 {
         return Err(AppError::Validation(
-            "Password must be at least 8 characters long.".to_string()
+            "Password must be at least 8 characters long.".to_string(),
         ));
     }
     let has_letter = password.chars().any(|c| c.is_alphabetic());
-    let has_digit  = password.chars().any(|c| c.is_numeric());
+    let has_digit = password.chars().any(|c| c.is_numeric());
     if !has_letter || !has_digit {
         return Err(AppError::Validation(
-            "Password must contain at least one letter and one number.".to_string()
+            "Password must contain at least one letter and one number.".to_string(),
         ));
     }
     Ok(())

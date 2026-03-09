@@ -8,8 +8,17 @@ Ship a production-grade offline-first pharmacy desktop app with stable billing, 
 
 - M0 Repo Stabilization: completed (scaffold alignment, compile stability, CI workflow presence).
 - M1 Auth + App Shell: completed and running.
-- M2 Medicine Master: in progress with live list + create + edit + detail + batch create.
-- Next M2 steps: barcode/rack validation and richer expiry/stock indicators.
+- M2 Medicine Master: completed baseline (list/create/edit/detail/batches, barcode lookup, rack validation, low-stock + expiry indicators).
+- M3 Billing Core: completed baseline (search/barcode add, cart GST/discounts, split payments, hold/restore, transactional save).
+- M4 Purchase + Supplier + Customer: completed baseline (supplier/customer/doctor flows, purchase bills/POs/returns, email import pipeline, credit payment).
+- M5 Reports + Audit + Backup: in progress (audit capture is active; reports and backup commands are pending implementation).
+- M6 Hardening + Release: in progress (strict hard-check gates now green; runtime panic paths replaced with safe user-facing errors for unfinished modules).
+
+### Phase 6 Snapshot
+
+- Expiry dashboard and barcode-based expiry lookup are live.
+- Expiry return workflow can now create supplier debit notes from selected batches.
+- Remaining Phase 6 work: barcode bulk generation, label template design, printer queue management.
 
 ## Milestones
 

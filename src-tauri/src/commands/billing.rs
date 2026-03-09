@@ -18,39 +18,54 @@
 //! 10. INSERT INTO audit_log
 //! 11. COMMIT; return new bill_id
 
-use crate::{AppState, error::AppError};
+use crate::{error::AppError, AppState};
 use serde::Deserialize;
 use tauri::State;
 
 #[derive(Debug, Deserialize)]
 pub struct CreateBillInput {
-    pub customer_id: Option<i64>, pub doctor_id: Option<i64>,
+    pub customer_id: Option<i64>,
+    pub doctor_id: Option<i64>,
     pub prescription_ref: Option<String>,
     pub prescription_image: Option<String>,
     pub loyalty_points_redeemed: Option<i64>,
-    pub items: Vec<BillItemInput>, pub payments: Vec<PaymentInput>,
-    pub discount_amount: Option<f64>, pub notes: Option<String>,
+    pub items: Vec<BillItemInput>,
+    pub payments: Vec<PaymentInput>,
+    pub discount_amount: Option<f64>,
+    pub notes: Option<String>,
     pub created_by: i64,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct BillItemInput {
-    pub medicine_id: i64, pub batch_id: i64,
-    pub medicine_name: String, pub batch_number: String, pub expiry_date: String,
-    pub quantity: i64, pub unit_price: f64, pub mrp: f64,
-    pub discount_percent: f64, pub discount_amount: f64, pub gst_rate: f64,
-    pub cgst_amount: f64, pub sgst_amount: f64, pub igst_amount: f64,
+    pub medicine_id: i64,
+    pub batch_id: i64,
+    pub medicine_name: String,
+    pub batch_number: String,
+    pub expiry_date: String,
+    pub quantity: i64,
+    pub unit_price: f64,
+    pub mrp: f64,
+    pub discount_percent: f64,
+    pub discount_amount: f64,
+    pub gst_rate: f64,
+    pub cgst_amount: f64,
+    pub sgst_amount: f64,
+    pub igst_amount: f64,
     pub total_amount: f64,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct PaymentInput {
-    pub amount: f64, pub payment_mode: String, pub reference_no: Option<String>,
+    pub amount: f64,
+    pub payment_mode: String,
+    pub reference_no: Option<String>,
 }
 
 #[tauri::command]
 pub async fn billing_create_bill(
-    state: State<'_, AppState>, input: CreateBillInput
+    state: State<'_, AppState>,
+    input: CreateBillInput,
 ) -> Result<i64, AppError> {
     let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
     db.create_bill(&input)
@@ -58,7 +73,10 @@ pub async fn billing_create_bill(
 
 #[tauri::command]
 pub async fn billing_cancel_bill(
-    state: State<'_, AppState>, bill_id: i64, reason: String, user_id: i64
+    state: State<'_, AppState>,
+    bill_id: i64,
+    reason: String,
+    user_id: i64,
 ) -> Result<(), AppError> {
     let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
     db.cancel_bill(bill_id, &reason, user_id)
@@ -66,7 +84,8 @@ pub async fn billing_cancel_bill(
 
 #[tauri::command]
 pub async fn billing_get_bill(
-    state: State<'_, AppState>, bill_id: i64
+    state: State<'_, AppState>,
+    bill_id: i64,
 ) -> Result<serde_json::Value, AppError> {
     let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
     db.get_bill_json(bill_id)
@@ -74,7 +93,8 @@ pub async fn billing_get_bill(
 
 #[tauri::command]
 pub async fn billing_list_bills(
-    state: State<'_, AppState>, filters: serde_json::Value
+    state: State<'_, AppState>,
+    filters: serde_json::Value,
 ) -> Result<serde_json::Value, AppError> {
     let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
     db.list_bills(&filters)
@@ -82,7 +102,8 @@ pub async fn billing_list_bills(
 
 #[tauri::command]
 pub async fn billing_hold_bill(
-    state: State<'_, AppState>, input: serde_json::Value
+    state: State<'_, AppState>,
+    input: serde_json::Value,
 ) -> Result<(), AppError> {
     let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
     db.hold_bill(&input)
@@ -90,7 +111,7 @@ pub async fn billing_hold_bill(
 
 #[tauri::command]
 pub async fn billing_get_held_bills(
-    state: State<'_, AppState>
+    state: State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
     let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
     db.get_held_bills()
@@ -98,7 +119,8 @@ pub async fn billing_get_held_bills(
 
 #[tauri::command]
 pub async fn billing_restore_held_bill(
-    state: State<'_, AppState>, held_bill_id: i64
+    state: State<'_, AppState>,
+    held_bill_id: i64,
 ) -> Result<serde_json::Value, AppError> {
     let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
     db.restore_held_bill(held_bill_id)
@@ -106,18 +128,22 @@ pub async fn billing_restore_held_bill(
 
 #[tauri::command]
 pub async fn billing_create_return(
-    state: State<'_, AppState>, original_bill_id: i64,
-    items: serde_json::Value, reason: String, user_id: i64
+    state: State<'_, AppState>,
+    original_bill_id: i64,
+    items: serde_json::Value,
+    reason: String,
+    user_id: i64,
 ) -> Result<i64, AppError> {
-    // TODO: TRANSACTION: INSERT sale_returns + items, REVERSE batch quantities, refund loyalty pts
-    todo!("billing_create_return")
+    Err(AppError::Validation(
+        "Sales return workflow is not implemented yet. Please use purchase return for now."
+            .to_string(),
+    ))
 }
 
 #[tauri::command]
 pub async fn billing_get_today_summary(
-    state: State<'_, AppState>
+    state: State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
     let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
     db.get_today_summary()
 }
-

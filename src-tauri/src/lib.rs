@@ -1,7 +1,7 @@
+pub mod background;
 pub mod commands;
 pub mod db;
 pub mod error;
-pub mod background;
 pub mod security;
 
 use std::sync::Mutex;

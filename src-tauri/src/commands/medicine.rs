@@ -108,7 +108,12 @@ pub async fn medicine_search(
     sort: Option<String>,
 ) -> Result<Vec<MedicineDto>, AppError> {
     let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
-    db.search_medicines(query.as_deref(), category_id, in_stock_only.unwrap_or(false), sort.as_deref())
+    db.search_medicines(
+        query.as_deref(),
+        category_id,
+        in_stock_only.unwrap_or(false),
+        sort.as_deref(),
+    )
 }
 
 #[tauri::command]
@@ -138,7 +143,9 @@ pub async fn medicine_create(
     }
 
     if !(0.0..=28.0).contains(&input.default_gst_rate) {
-        return Err(AppError::Validation("GST rate must be between 0 and 28.".to_string()));
+        return Err(AppError::Validation(
+            "GST rate must be between 0 and 28.".to_string(),
+        ));
     }
 
     if input.reorder_level < 0 || input.reorder_quantity < 1 {
@@ -163,15 +170,18 @@ pub async fn medicine_create(
         "medicine",
         &medicine_id.to_string(),
         None,
-        Some(&serde_json::json!({
-            "name": input.name,
-            "generic_name": input.generic_name,
-            "category_id": input.category_id,
-            "schedule": input.schedule,
-            "default_gst_rate": input.default_gst_rate,
-            "reorder_level": input.reorder_level,
-            "reorder_quantity": input.reorder_quantity,
-        }).to_string()),
+        Some(
+            &serde_json::json!({
+                "name": input.name,
+                "generic_name": input.generic_name,
+                "category_id": input.category_id,
+                "schedule": input.schedule,
+                "default_gst_rate": input.default_gst_rate,
+                "reorder_level": input.reorder_level,
+                "reorder_quantity": input.reorder_quantity,
+            })
+            .to_string(),
+        ),
         "System",
     )?;
 
@@ -207,7 +217,9 @@ pub async fn medicine_update(
     }
 
     if !(0.0..=28.0).contains(&input.default_gst_rate) {
-        return Err(AppError::Validation("GST rate must be between 0 and 28.".to_string()));
+        return Err(AppError::Validation(
+            "GST rate must be between 0 and 28.".to_string(),
+        ));
     }
 
     if input.reorder_level < 0 || input.reorder_quantity < 1 {
@@ -232,24 +244,30 @@ pub async fn medicine_update(
         "MEDICINE_UPDATED",
         "medicine",
         &id.to_string(),
-        Some(&serde_json::json!({
-            "name": before.name,
-            "generic_name": before.generic_name,
-            "category_id": before.category_id,
-            "schedule": before.schedule,
-            "default_gst_rate": before.default_gst_rate,
-            "reorder_level": before.reorder_level,
-            "reorder_quantity": before.reorder_quantity,
-        }).to_string()),
-        Some(&serde_json::json!({
-            "name": input.name,
-            "generic_name": input.generic_name,
-            "category_id": input.category_id,
-            "schedule": input.schedule,
-            "default_gst_rate": input.default_gst_rate,
-            "reorder_level": input.reorder_level,
-            "reorder_quantity": input.reorder_quantity,
-        }).to_string()),
+        Some(
+            &serde_json::json!({
+                "name": before.name,
+                "generic_name": before.generic_name,
+                "category_id": before.category_id,
+                "schedule": before.schedule,
+                "default_gst_rate": before.default_gst_rate,
+                "reorder_level": before.reorder_level,
+                "reorder_quantity": before.reorder_quantity,
+            })
+            .to_string(),
+        ),
+        Some(
+            &serde_json::json!({
+                "name": input.name,
+                "generic_name": input.generic_name,
+                "category_id": input.category_id,
+                "schedule": input.schedule,
+                "default_gst_rate": input.default_gst_rate,
+                "reorder_level": input.reorder_level,
+                "reorder_quantity": input.reorder_quantity,
+            })
+            .to_string(),
+        ),
         &format!("user:{}", input.updated_by),
     )?;
 
@@ -314,15 +332,18 @@ pub async fn medicine_create_batch(
         "medicine_batch",
         &batch_id.to_string(),
         None,
-        Some(&serde_json::json!({
-            "medicine_id": input.medicine_id,
-            "batch_number": input.batch_number,
-            "expiry_date": input.expiry_date,
-            "purchase_price": input.purchase_price,
-            "selling_price": input.selling_price,
-            "quantity_in": input.quantity_in,
-            "rack_location": input.rack_location,
-        }).to_string()),
+        Some(
+            &serde_json::json!({
+                "medicine_id": input.medicine_id,
+                "batch_number": input.batch_number,
+                "expiry_date": input.expiry_date,
+                "purchase_price": input.purchase_price,
+                "selling_price": input.selling_price,
+                "quantity_in": input.quantity_in,
+                "rack_location": input.rack_location,
+            })
+            .to_string(),
+        ),
         &format!("user:{}", input.created_by),
     )?;
 
@@ -400,12 +421,15 @@ pub async fn medicine_update_batch(
         "medicine_batch",
         &batch_id.to_string(),
         None,
-        Some(&serde_json::json!({
-            "expiry_date": input.expiry_date,
-            "purchase_price": input.purchase_price,
-            "selling_price": input.selling_price,
-            "rack_location": input.rack_location,
-        }).to_string()),
+        Some(
+            &serde_json::json!({
+                "expiry_date": input.expiry_date,
+                "purchase_price": input.purchase_price,
+                "selling_price": input.selling_price,
+                "rack_location": input.rack_location,
+            })
+            .to_string(),
+        ),
         &format!("user:{}", input.updated_by),
     )?;
 
