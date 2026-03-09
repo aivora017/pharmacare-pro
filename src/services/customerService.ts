@@ -28,6 +28,8 @@ export const customerService = {
     invoke('customer_update', { id, data, userId }),
   getHistory: async (customerId: number, limit = 50) =>
     invoke('customer_get_history', { customerId, limit }),
+  recordCreditPayment: async (customerId: number, amount: number, userId: number): Promise<void> =>
+    invoke('customer_record_credit_payment', { customerId, amount, userId }),
   listDoctors: async (): Promise<IDoctor[]> => invoke<IDoctor[]>('doctor_list'),
   createDoctor: async (data: Partial<IDoctor>, userId: number): Promise<number> =>
     invoke<number>('doctor_create', { data, userId }),

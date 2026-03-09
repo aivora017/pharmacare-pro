@@ -1153,6 +1153,62 @@ impl Database {
         Ok(serde_json::Value::Array(history))
     }
 
+    pub fn customer_record_credit_payment(
+        &self,
+        customer_id: i64,
+        amount: f64,
+        user_id: i64,
+    ) -> Result<(), AppError> {
+        if amount <= 0.0 {
+            return Err(AppError::Validation("Payment amount must be greater than zero.".to_string()));
+        }
+
+        let conn = self.connection()?;
+        let current_outstanding: f64 = conn
+            .query_row(
+                "SELECT outstanding_balance FROM customers WHERE id = ?1 AND is_active = 1",
+                params![customer_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|e| AppError::Internal(e.to_string()))?
+            .ok_or_else(|| AppError::Validation("Customer not found.".to_string()))?;
+
+        if current_outstanding <= 0.0 {
+            return Err(AppError::Validation("Customer has no outstanding balance.".to_string()));
+        }
+
+        let applied = amount.min(current_outstanding);
+        let remaining = (current_outstanding - applied).max(0.0);
+
+        conn.execute(
+            "UPDATE customers
+             SET outstanding_balance = ?1,
+                 updated_at = ?2
+             WHERE id = ?3",
+            params![remaining, chrono::Utc::now().to_rfc3339(), customer_id],
+        )
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        self.write_audit_log(
+            "CUSTOMER_CREDIT_PAYMENT",
+            "customer",
+            &customer_id.to_string(),
+            None,
+            Some(
+                &serde_json::json!({
+                    "paid_amount": applied,
+                    "before_outstanding": current_outstanding,
+                    "after_outstanding": remaining,
+                })
+                .to_string(),
+            ),
+            &format!("user:{}", user_id),
+        )?;
+
+        Ok(())
+    }
+
     pub fn doctor_list(&self) -> Result<serde_json::Value, AppError> {
         let conn = self.connection()?;
         let mut stmt = conn

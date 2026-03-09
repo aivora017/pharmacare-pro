@@ -51,6 +51,16 @@ pub async fn customer_get_history(state: State<'_, AppState>, customer_id: i64, 
     db.customer_get_history(customer_id, limit.unwrap_or(50))
 }
 #[tauri::command]
+pub async fn customer_record_credit_payment(
+    state: State<'_, AppState>,
+    customer_id: i64,
+    amount: f64,
+    user_id: i64,
+) -> Result<(), AppError> {
+    let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+    db.customer_record_credit_payment(customer_id, amount, user_id)
+}
+#[tauri::command]
 pub async fn doctor_list(state: State<'_, AppState>) -> Result<serde_json::Value, AppError> {
     let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
     db.doctor_list()

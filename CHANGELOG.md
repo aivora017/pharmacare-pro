@@ -14,3 +14,4 @@ The format is based on Keep a Changelog.
 - Supplier backend commands and Suppliers page with list, create, and update flows.
 - Manual purchase bill backend commands (create/get/list) with supplier outstanding update and audit logging.
 - Functional Purchase page with supplier/payment filters and bill entry form.
+- Customer credit payment command and UI action to reduce outstanding balances with audit logging.

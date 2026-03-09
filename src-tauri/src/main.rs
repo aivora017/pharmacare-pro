@@ -103,6 +103,7 @@ fn main() {
             customer::customer_create,
             customer::customer_update,
             customer::customer_get_history,
+            customer::customer_record_credit_payment,
             customer::doctor_list,
             customer::doctor_create,
             customer::doctor_update,

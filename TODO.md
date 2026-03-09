@@ -90,7 +90,7 @@
 - [x] Customer list with search (by name, phone)
 - [ ] Add/edit customer form (all fields from ICustomer)
 - [x] Customer detail page: purchase history timeline
-- [ ] Outstanding balance display and credit payment
+- [x] Outstanding balance display and credit payment
 - [ ] Loyalty points display and redemption at POS
 - [x] Doctor list + add/edit form
 - [ ] Prescription upload (image/PDF attachment to bill)

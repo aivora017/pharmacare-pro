@@ -63,6 +63,8 @@ export default function CustomersPage() {
   const [loadingDetail, setLoadingDetail] = useState(false)
   const [saving, setSaving] = useState(false)
   const [creating, setCreating] = useState(false)
+  const [creditAmount, setCreditAmount] = useState(0)
+  const [payingCredit, setPayingCredit] = useState(false)
 
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [selected, setSelected] = useState<ICustomer | null>(null)
@@ -215,6 +217,27 @@ export default function CustomersPage() {
     }
   }
 
+  const handleCreditPayment = async () => {
+    if (!user || !selectedId) return
+    if (creditAmount <= 0) {
+      toast.error('Enter a valid payment amount.')
+      return
+    }
+
+    setPayingCredit(true)
+    try {
+      await customerService.recordCreditPayment(selectedId, creditAmount, user.id)
+      toast.success('Credit payment recorded.')
+      setCreditAmount(0)
+      await Promise.all([loadList(query, selectedId), loadDetail(selectedId)])
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      toast.error(message || 'Could not record credit payment.')
+    } finally {
+      setPayingCredit(false)
+    }
+  }
+
   return (
     <div className="max-w-7xl mx-auto space-y-4">
       <PageHeader title="Customers" subtitle="Customer profiles, balances, and purchase history" />
@@ -307,6 +330,25 @@ export default function CustomersPage() {
                 <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
                   <p className="text-xs text-slate-500">Outstanding</p>
                   <p className="text-sm font-semibold text-red-600">Rs {selected.outstanding_balance.toFixed(2)}</p>
+                  <div className="mt-2 flex gap-2">
+                    <input
+                      value={creditAmount || ''}
+                      onChange={(e) => setCreditAmount(Number(e.target.value) || 0)}
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      placeholder="Pay"
+                      className="w-24 border border-slate-300 rounded-md px-2 py-1 text-xs min-h-touch"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleCreditPayment}
+                      disabled={payingCredit || selected.outstanding_balance <= 0}
+                      className="text-xs px-2 py-1 rounded-md bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white min-h-touch"
+                    >
+                      {payingCredit ? 'Saving...' : 'Record Payment'}
+                    </button>
+                  </div>
                 </div>
                 <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
                   <p className="text-xs text-slate-500">Loyalty Points</p>
