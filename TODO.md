@@ -102,9 +102,9 @@
 - [x] Barcode scan in Expiry mode → show full batch details
 - [x] Build expiry return list (scan multiple → create return note)
 - [x] Barcode generator (bulk generate for selected batches)
-- [ ] Label template designer (size, fields to print)
-- [ ] Print to barcode printer (Zebra ZPL commands)
-- [ ] Print queue management
+- [x] Label template designer (size, fields to print)
+- [x] Print to barcode printer (Zebra ZPL commands)
+- [x] Print queue management
 
 ## PHASE 7 — Reports (Weeks 14–16)
 

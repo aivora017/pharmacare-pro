@@ -35,3 +35,6 @@ The format is based on Keep a Changelog.
 - Expiry page now creates supplier debit notes directly from selected expiring batches (grouped by supplier).
 - Barcode commands are now wired and support single-batch and bulk barcode generation with audit logging.
 - Barcodes page now includes Generate/Print/Printers tabs with medicine-batch selection and bulk barcode generation actions.
+- Barcodes Print tab now includes a working label template designer with configurable fields and per-batch label quantity.
+- Barcode label printing now writes ZPL and JSON queue jobs, and Printers tab supports per-printer test-print actions.
+- Print queue management is now available with queued job listing and requeue actions.

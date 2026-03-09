@@ -310,6 +310,7 @@ Feature completion highlights:
 - [x] Email import (IMAP config, polling, parser/mapping/review, auto-match)
 - [x] POS loyalty redemption + prescription attachment + allergy warnings
 - [x] Expiry dashboard + barcode expiry lookup + return-note creation from selected batches
+- [x] Barcode label template designer + ZPL queue generation + print queue requeue flow
 
 Hard-check status:
 

@@ -18,7 +18,8 @@ Ship a production-grade offline-first pharmacy desktop app with stable billing, 
 
 - Expiry dashboard and barcode-based expiry lookup are live.
 - Expiry return workflow can now create supplier debit notes from selected batches.
-- Remaining Phase 6 work: barcode bulk generation, label template design, printer queue management.
+- Barcode bulk generation, label template design, and printer queue management are now live in baseline form.
+- Remaining Phase 6 work: direct physical print-spool integration and advanced queue states (failed/completed tracking).
 
 ## Milestones
 

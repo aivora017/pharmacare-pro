@@ -134,6 +134,8 @@ fn main() {
             printer::printer_print_bill,
             printer::printer_print_labels,
             printer::printer_test_print,
+            printer::printer_list_jobs,
+            printer::printer_requeue_job,
         ])
         .run(tauri::generate_context!())
         .expect("Error starting PharmaCare Pro");

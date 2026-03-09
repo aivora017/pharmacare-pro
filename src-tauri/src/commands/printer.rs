@@ -14,6 +14,88 @@ fn job_dir() -> Result<PathBuf, AppError> {
     Ok(dir)
 }
 
+#[tauri::command]
+pub async fn printer_list_jobs(_state: State<'_, AppState>) -> Result<serde_json::Value, AppError> {
+    let dir = job_dir()?;
+    let mut items = Vec::new();
+
+    for entry in fs::read_dir(&dir).map_err(|e| AppError::Internal(e.to_string()))? {
+        let entry = entry.map_err(|e| AppError::Internal(e.to_string()))?;
+        let metadata = entry
+            .metadata()
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        if !metadata.is_file() {
+            continue;
+        }
+
+        let file_name = entry.file_name().to_string_lossy().to_string();
+        let ext = entry
+            .path()
+            .extension()
+            .and_then(|v| v.to_str())
+            .unwrap_or("")
+            .to_string();
+
+        items.push(serde_json::json!({
+            "file_name": file_name,
+            "size_bytes": metadata.len(),
+            "modified_at": metadata
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs()),
+            "extension": ext,
+        }));
+    }
+
+    items.sort_by(|a, b| {
+        let ma = a.get("modified_at").and_then(|v| v.as_u64()).unwrap_or(0);
+        let mb = b.get("modified_at").and_then(|v| v.as_u64()).unwrap_or(0);
+        mb.cmp(&ma)
+    });
+
+    Ok(serde_json::json!({
+        "items": items,
+        "total": items.len(),
+    }))
+}
+
+#[tauri::command]
+pub async fn printer_requeue_job(
+    state: State<'_, AppState>,
+    file_name: String,
+    printer_name: String,
+) -> Result<(), AppError> {
+    let source = job_dir()?.join(file_name.trim());
+    if !source.exists() {
+        return Err(AppError::Validation("Print job file not found.".to_string()));
+    }
+
+    let stamp = chrono::Utc::now().format("%Y%m%d_%H%M%S").to_string();
+    let target = job_dir()?.join(format!("requeue_{}_{}", stamp, source.file_name().and_then(|v| v.to_str()).unwrap_or("job")));
+    fs::copy(&source, &target).map_err(|e| AppError::Internal(e.to_string()))?;
+
+    let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+    db.write_audit_log(
+        "PRINT_JOB_REQUEUED",
+        "printer",
+        source.file_name().and_then(|v| v.to_str()).unwrap_or("job"),
+        None,
+        Some(
+            &serde_json::json!({
+                "source": source.to_string_lossy(),
+                "target": target.to_string_lossy(),
+                "printer_name": printer_name,
+            })
+            .to_string(),
+        ),
+        "System",
+    )?;
+
+    Ok(())
+}
+
 fn json_pretty(value: &serde_json::Value) -> Result<String, AppError> {
     serde_json::to_string_pretty(value).map_err(|e| AppError::Internal(e.to_string()))
 }
