@@ -1,3 +1,4 @@
+use crate::commands::permission::require_permission;
 use crate::{error::AppError, AppState};
 use tauri::State;
 
@@ -18,6 +19,7 @@ pub async fn settings_set(
     user_id: i64,
 ) -> Result<(), AppError> {
     let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+    require_permission(&db, user_id, "settings")?;
     db.set_setting(&key, &value, Some(user_id))
 }
 

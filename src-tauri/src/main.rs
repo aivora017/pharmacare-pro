@@ -22,7 +22,10 @@ mod security;
 mod background;
 mod error;
 
-use commands::{auth, barcode, billing, customer, email_import, medicine, printer, purchase, settings};
+use commands::{
+    ai_commands, auth, backup, barcode, billing, customer, email_import, license, medicine,
+    printer, purchase, reports, settings,
+};
 use db::Database;
 use std::sync::Mutex;
 use tauri::Manager;
@@ -100,6 +103,8 @@ fn main() {
             billing::billing_hold_bill,
             billing::billing_get_held_bills,
             billing::billing_restore_held_bill,
+            billing::billing_create_return,
+            billing::billing_list_returns,
             billing::billing_get_today_summary,
 
             // Customers
@@ -136,6 +141,37 @@ fn main() {
             printer::printer_test_print,
             printer::printer_list_jobs,
             printer::printer_requeue_job,
+
+            // Backup
+            backup::backup_create,
+            backup::backup_restore,
+            backup::backup_list,
+
+            // License
+            license::license_validate,
+            license::license_activate,
+            license::license_get_status,
+
+            // AI
+            ai_commands::ai_get_morning_briefing,
+            ai_commands::ai_get_demand_forecast,
+            ai_commands::ai_get_expiry_risks,
+            ai_commands::ai_get_customer_segments,
+            ai_commands::ai_get_anomalies,
+            ai_commands::ai_ask_pharmacare,
+            ai_commands::ai_compose_message,
+
+            // Reports
+            reports::reports_sales,
+            reports::reports_purchase,
+            reports::reports_stock,
+            reports::reports_gst,
+            reports::reports_profit_loss,
+            reports::reports_expiry_writeoff,
+            reports::reports_customer_outstanding,
+            reports::reports_supplier_outstanding,
+            reports::reports_ca_package,
+            reports::reports_audit_log,
         ])
         .run(tauri::generate_context!())
         .expect("Error starting PharmaCare Pro");

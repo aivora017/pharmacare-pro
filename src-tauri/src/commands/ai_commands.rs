@@ -21,47 +21,46 @@ use tauri::State;
 pub async fn ai_get_morning_briefing(
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
-    Err(AppError::Validation(
-        "AI morning briefing is not implemented yet.".to_string(),
-    ))
+    let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+    db.ai_get_morning_briefing()
 }
 #[tauri::command]
 pub async fn ai_get_demand_forecast(
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
-    Err(AppError::Validation(
-        "AI demand forecast is not implemented yet.".to_string(),
-    ))
+    let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+    db.ai_get_demand_forecast()
 }
 #[tauri::command]
 pub async fn ai_get_expiry_risks(
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
-    Err(AppError::Validation(
-        "AI expiry risk scoring is not implemented yet.".to_string(),
-    ))
+    let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+    db.ai_get_expiry_risks()
 }
 #[tauri::command]
 pub async fn ai_get_customer_segments(
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
-    Err(AppError::Validation(
-        "AI customer segmentation is not implemented yet.".to_string(),
-    ))
+    let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+    db.ai_get_customer_segments()
 }
 #[tauri::command]
 pub async fn ai_get_anomalies(state: State<'_, AppState>) -> Result<serde_json::Value, AppError> {
-    Err(AppError::Validation(
-        "AI anomaly detection is not implemented yet.".to_string(),
-    ))
+    let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+    db.ai_get_anomalies()
 }
 #[tauri::command]
 pub async fn ai_ask_pharmacare(
     state: State<'_, AppState>,
     question: String,
 ) -> Result<String, AppError> {
-    Err(AppError::Validation(
-        "AI assistant is not implemented yet.".to_string(),
+    let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+    let summary = db.get_today_summary()?;
+    Ok(format!(
+        "I can help with pharmacy operations. Today's summary: {}. Your question: {}",
+        summary,
+        question.trim()
     ))
 }
 #[tauri::command]
@@ -71,7 +70,11 @@ pub async fn ai_compose_message(
     customer_name: String,
     details: serde_json::Value,
 ) -> Result<String, AppError> {
-    Err(AppError::Validation(
-        "AI message composer is not implemented yet.".to_string(),
-    ))
+    let msg = format!(
+        "Hi {}, this is your pharmacy. {}. Details: {}",
+        customer_name.trim(),
+        situation.trim(),
+        details
+    );
+    Ok(msg)
 }

@@ -19,14 +19,18 @@ import { ShoppingCart, Search, User, PauseCircle, Paperclip, AlertTriangle } fro
 import toast from 'react-hot-toast'
 import { useCartStore } from '@/store/cartStore'
 import { useAuthStore } from '@/store/authStore'
-import { billingService, type IHeldBillSummary } from '@/services/billingService'
+import {
+  billingService,
+  type IHeldBillSummary,
+  type ISaleReturnSummary,
+} from '@/services/billingService'
 import { printerService } from '@/services/printerService'
 import {
   medicineService,
   type IBatchItem,
   type IMedicineListItem,
 } from '@/services/medicineService'
-import type { ICartItem } from '@/types'
+import type { IBill, ICartItem } from '@/types'
 import { formatCurrency } from '@/utils/currency'
 import { MedicineSearchDropdown } from './components/MedicineSearchDropdown'
 import { PaymentPanel } from './components/PaymentPanel'
@@ -69,8 +73,22 @@ export default function BillingPage() {
   const [isAddingItem, setIsAddingItem] = useState(false)
   const [isSavingBill, setIsSavingBill] = useState(false)
   const [showHeldBills, setShowHeldBills] = useState(false)
+  const [showBillHistory, setShowBillHistory] = useState(false)
+  const [showSalesReturn, setShowSalesReturn] = useState(false)
   const [isLoadingHeldBills, setIsLoadingHeldBills] = useState(false)
   const [heldBills, setHeldBills] = useState<IHeldBillSummary[]>([])
+  const [returnBillIdInput, setReturnBillIdInput] = useState('')
+  const [isLoadingReturnBill, setIsLoadingReturnBill] = useState(false)
+  const [isSubmittingReturn, setIsSubmittingReturn] = useState(false)
+  const [returnBill, setReturnBill] = useState<IBill | null>(null)
+  const [returnQtyByItemId, setReturnQtyByItemId] = useState<Record<number, number>>({})
+  const [returnReason, setReturnReason] = useState('Customer return')
+  const [recentReturns, setRecentReturns] = useState<ISaleReturnSummary[]>([])
+  const [isLoadingRecentReturns, setIsLoadingRecentReturns] = useState(false)
+  const [recentBills, setRecentBills] = useState<IBill[]>([])
+  const [isLoadingRecentBills, setIsLoadingRecentBills] = useState(false)
+  const [historyPrinterType, setHistoryPrinterType] = useState<'thermal' | 'normal'>('thermal')
+  const [printingBillId, setPrintingBillId] = useState<number | null>(null)
   const [prescriptionRef, setPrescriptionRef] = useState('')
   const [prescriptionImage, setPrescriptionImage] = useState<string | undefined>(undefined)
   const [redeemInput, setRedeemInput] = useState('0')
@@ -150,6 +168,131 @@ export default function BillingPage() {
       }
     },
     [addItem, clear, setCustomer]
+  )
+
+  const loadReturnBill = useCallback(async () => {
+    const billId = Number(returnBillIdInput)
+    if (!Number.isInteger(billId) || billId <= 0) {
+      toast.error('Enter a valid bill ID.')
+      return
+    }
+
+    try {
+      setIsLoadingReturnBill(true)
+      const bill = await billingService.getBill(billId)
+      if (bill.status !== 'active') {
+        toast.error('Only active bills can be returned.')
+        setReturnBill(null)
+        return
+      }
+
+      setReturnBill(bill)
+      const initialQty: Record<number, number> = {}
+      for (const item of bill.items ?? []) {
+        initialQty[item.id] = 0
+      }
+      setReturnQtyByItemId(initialQty)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not load bill for return.'
+      toast.error(message)
+      setReturnBill(null)
+    } finally {
+      setIsLoadingReturnBill(false)
+    }
+  }, [returnBillIdInput])
+
+  const submitSalesReturn = useCallback(async () => {
+    if (!user) {
+      toast.error('Session expired. Please login again.')
+      return
+    }
+
+    if (!returnBill) {
+      toast.error('Load a bill first.')
+      return
+    }
+
+    const lines = (returnBill.items ?? [])
+      .map((item) => ({
+        bill_item_id: item.id,
+        quantity: Math.max(0, Math.floor(returnQtyByItemId[item.id] ?? 0)),
+      }))
+      .filter((item) => item.quantity > 0)
+
+    if (lines.length === 0) {
+      toast.error('Select at least one item quantity for return.')
+      return
+    }
+
+    try {
+      setIsSubmittingReturn(true)
+      const returnId = await billingService.createReturn(
+        returnBill.id,
+        lines,
+        returnReason.trim() || 'Customer return',
+        user.id
+      )
+      toast.success(`Sales return #${returnId} created.`)
+      try {
+        const latest = await billingService.listReturns(10)
+        setRecentReturns(latest)
+      } catch {
+        // Non-blocking refresh failure; creation already succeeded.
+      }
+      setShowSalesReturn(false)
+      setReturnBill(null)
+      setReturnBillIdInput('')
+      setReturnQtyByItemId({})
+      setReturnReason('Customer return')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not create sales return.'
+      toast.error(message)
+    } finally {
+      setIsSubmittingReturn(false)
+    }
+  }, [returnBill, returnQtyByItemId, returnReason, user])
+
+  const loadRecentReturns = useCallback(async () => {
+    try {
+      setIsLoadingRecentReturns(true)
+      const rows = await billingService.listReturns(10)
+      setRecentReturns(rows)
+    } catch {
+      toast.error('Could not load recent sales returns.')
+    } finally {
+      setIsLoadingRecentReturns(false)
+    }
+  }, [])
+
+  const loadRecentBills = useCallback(async () => {
+    try {
+      setIsLoadingRecentBills(true)
+      const payload = await billingService.listBills({ page: 1, page_size: 20, status: 'active' })
+      setRecentBills(payload.bills ?? [])
+    } catch {
+      toast.error('Could not load bill history.')
+    } finally {
+      setIsLoadingRecentBills(false)
+    }
+  }, [])
+
+  const reprintBill = useCallback(
+    async (billId: number) => {
+      try {
+        if (!user) {
+          toast.error('Session expired. Please login again.')
+          return
+        }
+        setPrintingBillId(billId)
+        await printerService.printBill(billId, historyPrinterType, user.id)
+        toast.success(`Bill #${billId} sent to printer.`)
+      } catch {
+        toast.error('Reprint failed. Check printer connection and try again.')
+      } finally {
+        setPrintingBillId(null)
+      }
+    },
+    [historyPrinterType]
   )
 
   const addMedicineToCart = useCallback(
@@ -256,7 +399,7 @@ export default function BillingPage() {
 
       if (payload.print.enabled) {
         try {
-          await printerService.printBill(billId, payload.print.printer_type)
+          await printerService.printBill(billId, payload.print.printer_type, user.id)
           toast.success('Print job queued.')
         } catch {
           toast.error('Print failed. Please retry from bill history.')
@@ -313,6 +456,20 @@ export default function BillingPage() {
   }, [searchQuery])
 
   useEffect(() => {
+    if (!showSalesReturn) {
+      return
+    }
+    void loadRecentReturns()
+  }, [loadRecentReturns, showSalesReturn])
+
+  useEffect(() => {
+    if (!showBillHistory) {
+      return
+    }
+    void loadRecentBills()
+  }, [loadRecentBills, showBillHistory])
+
+  useEffect(() => {
     const h = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null
       const isEditableTarget =
@@ -335,6 +492,8 @@ export default function BillingPage() {
       if (e.key === 'Escape') {
         setShowPayment(false)
         setShowHeldBills(false)
+        setShowBillHistory(false)
+        setShowSalesReturn(false)
         return
       }
 
@@ -405,7 +564,9 @@ export default function BillingPage() {
       return
     }
 
-    setAllergyWarning(`Potential allergy/condition match for: ${hits.map((item) => item.medicine_name).join(', ')}`)
+    setAllergyWarning(
+      `Potential allergy/condition match for: ${hits.map((item) => item.medicine_name).join(', ')}`
+    )
   }, [customer, items])
 
   return (
@@ -480,6 +641,22 @@ export default function BillingPage() {
               className="flex items-center gap-1.5 px-3 py-2 text-sm border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors min-h-touch"
             >
               Held Bills<kbd className="ml-1 text-slate-400 text-xs font-mono">F5</kbd>
+            </button>
+            <button
+              onClick={() => {
+                setShowBillHistory(true)
+              }}
+              className="flex items-center gap-1.5 px-3 py-2 text-sm border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors min-h-touch"
+            >
+              Bill History
+            </button>
+            <button
+              onClick={() => {
+                setShowSalesReturn(true)
+              }}
+              className="flex items-center gap-1.5 px-3 py-2 text-sm border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors min-h-touch"
+            >
+              Sales Return
             </button>
           </div>
         </div>
@@ -621,7 +798,8 @@ export default function BillingPage() {
               <div className="text-sm text-slate-600 space-y-0.5">
                 {customer && (
                   <p className="text-xs text-slate-500">
-                    Customer points: {customer.loyalty_points} | Outstanding: ₹{customer.outstanding_balance.toFixed(2)}
+                    Customer points: {customer.loyalty_points} | Outstanding: ₹
+                    {customer.outstanding_balance.toFixed(2)}
                   </p>
                 )}
                 <p>
@@ -642,7 +820,10 @@ export default function BillingPage() {
                       type="button"
                       onClick={() => {
                         const value = Math.floor(Number(redeemInput) || 0)
-                        const maxAllowed = Math.min(customer.loyalty_points, Math.floor(totals.net_amount))
+                        const maxAllowed = Math.min(
+                          customer.loyalty_points,
+                          Math.floor(totals.net_amount)
+                        )
                         const finalPoints = Math.max(0, Math.min(value, maxAllowed))
                         setRedeemedPoints(finalPoints)
                         setRedeemInput(finalPoints.toString())
@@ -755,6 +936,232 @@ export default function BillingPage() {
                     </li>
                   ))}
                 </ul>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+      {showBillHistory && (
+        <div className="fixed inset-0 z-30 bg-black/20 flex items-center justify-center p-4">
+          <div className="w-full max-w-4xl rounded-xl border border-slate-200 bg-white shadow-xl">
+            <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between">
+              <h3 className="font-semibold text-slate-800">Bill History & Reprint</h3>
+              <button
+                type="button"
+                onClick={() => setShowBillHistory(false)}
+                className="min-h-touch px-3 rounded-lg border border-slate-300 text-sm hover:bg-slate-50"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="p-4 space-y-3">
+              <div className="flex flex-wrap items-end gap-3">
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-slate-600">Print Format</label>
+                  <select
+                    value={historyPrinterType}
+                    onChange={(e) => setHistoryPrinterType(e.target.value as 'thermal' | 'normal')}
+                    className="min-h-touch rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  >
+                    <option value="thermal">Thermal (80mm)</option>
+                    <option value="normal">Normal (A4)</option>
+                  </select>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void loadRecentBills()
+                  }}
+                  disabled={isLoadingRecentBills}
+                  className="min-h-touch rounded-lg border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50 disabled:opacity-50"
+                >
+                  {isLoadingRecentBills ? 'Refreshing...' : 'Refresh'}
+                </button>
+              </div>
+
+              <div className="rounded-lg border border-slate-200 overflow-hidden">
+                {isLoadingRecentBills ? (
+                  <p className="p-4 text-sm text-slate-500">Loading bill history...</p>
+                ) : recentBills.length === 0 ? (
+                  <p className="p-4 text-sm text-slate-500">No bills found.</p>
+                ) : (
+                  <div className="max-h-[420px] overflow-auto">
+                    <table className="min-w-full text-sm">
+                      <thead className="bg-slate-50 border-b border-slate-200">
+                        <tr className="text-left text-slate-600">
+                          <th className="px-3 py-2.5 font-medium">Bill #</th>
+                          <th className="px-3 py-2.5 font-medium">Bill Date</th>
+                          <th className="px-3 py-2.5 font-medium text-right">Net Amount</th>
+                          <th className="px-3 py-2.5 font-medium">Status</th>
+                          <th className="px-3 py-2.5 font-medium text-right">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {recentBills.map((bill) => (
+                          <tr key={bill.id} className="border-b border-slate-100 last:border-0">
+                            <td className="px-3 py-2.5 text-slate-800 font-medium">{bill.bill_number}</td>
+                            <td className="px-3 py-2.5 text-slate-600">{bill.bill_date}</td>
+                            <td className="px-3 py-2.5 text-right text-slate-800">
+                              {formatCurrency(bill.net_amount)}
+                            </td>
+                            <td className="px-3 py-2.5 text-slate-600 capitalize">{bill.status}</td>
+                            <td className="px-3 py-2.5 text-right">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  void reprintBill(bill.id)
+                                }}
+                                disabled={printingBillId === bill.id}
+                                className="min-h-touch rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:bg-blue-300"
+                              >
+                                {printingBillId === bill.id ? 'Printing...' : 'Reprint'}
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {showSalesReturn && (
+        <div className="fixed inset-0 z-30 bg-black/20 flex items-center justify-center p-4">
+          <div className="w-full max-w-3xl rounded-xl border border-slate-200 bg-white shadow-xl">
+            <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between">
+              <h3 className="font-semibold text-slate-800">Create Sales Return</h3>
+              <button
+                type="button"
+                onClick={() => setShowSalesReturn(false)}
+                className="min-h-touch px-3 rounded-lg border border-slate-300 text-sm hover:bg-slate-50"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="p-4 space-y-4">
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <p className="text-xs font-medium text-slate-600 mb-2">Recent Sales Returns</p>
+                {isLoadingRecentReturns ? (
+                  <p className="text-sm text-slate-500">Loading recent returns...</p>
+                ) : recentReturns.length === 0 ? (
+                  <p className="text-sm text-slate-500">No recent sales returns found.</p>
+                ) : (
+                  <div className="space-y-1.5 max-h-36 overflow-y-auto">
+                    {recentReturns.map((row) => (
+                      <button
+                        key={row.id}
+                        type="button"
+                        onClick={() => setReturnBillIdInput(String(row.original_bill_id))}
+                        className="w-full rounded border border-slate-200 bg-white px-2 py-1.5 text-left hover:bg-slate-100"
+                      >
+                        <p className="text-xs font-medium text-slate-800">
+                          {row.return_number} | Bill #{row.original_bill_id} ({row.original_bill_number || 'N/A'})
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          {row.return_date} | Amount: {formatCurrency(row.total_amount)}
+                        </p>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                <div className="md:col-span-2">
+                  <label className="mb-1 block text-xs font-medium text-slate-600">Bill ID</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={returnBillIdInput}
+                    onChange={(e) => setReturnBillIdInput(e.target.value)}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm min-h-touch"
+                    placeholder="Enter original bill ID"
+                  />
+                </div>
+                <div className="md:col-span-2 flex items-end">
+                  <button
+                    type="button"
+                    onClick={() => void loadReturnBill()}
+                    disabled={isLoadingReturnBill}
+                    className="w-full rounded-lg bg-slate-800 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-900 disabled:bg-slate-400 min-h-touch"
+                  >
+                    {isLoadingReturnBill ? 'Loading...' : 'Load Bill'}
+                  </button>
+                </div>
+              </div>
+
+              {returnBill && (
+                <>
+                  <div className="rounded-lg border border-slate-200 p-3 bg-slate-50">
+                    <p className="text-sm text-slate-700">
+                      Bill: <span className="font-semibold">{returnBill.bill_number}</span> | Date:{' '}
+                      {returnBill.bill_date}
+                    </p>
+                  </div>
+
+                  <div className="overflow-x-auto rounded-lg border border-slate-200">
+                    <table className="min-w-full text-sm">
+                      <thead className="bg-slate-50 text-slate-600">
+                        <tr>
+                          <th className="px-3 py-2.5 text-left font-medium">Medicine</th>
+                          <th className="px-3 py-2.5 text-right font-medium">Sold Qty</th>
+                          <th className="px-3 py-2.5 text-right font-medium">Return Qty</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(returnBill.items ?? []).map((item) => (
+                          <tr key={item.id} className="border-t border-slate-100">
+                            <td className="px-3 py-2.5 text-slate-700">{item.medicine_name}</td>
+                            <td className="px-3 py-2.5 text-right text-slate-700">{item.quantity}</td>
+                            <td className="px-3 py-2.5 text-right">
+                              <input
+                                type="number"
+                                min={0}
+                                max={item.quantity}
+                                value={returnQtyByItemId[item.id] ?? 0}
+                                onChange={(e) => {
+                                  const value = Math.max(
+                                    0,
+                                    Math.min(item.quantity, Math.floor(Number(e.target.value) || 0))
+                                  )
+                                  setReturnQtyByItemId((prev) => ({ ...prev, [item.id]: value }))
+                                }}
+                                className="w-24 rounded border border-slate-300 px-2 py-1 text-right min-h-touch"
+                              />
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-slate-600">Reason</label>
+                    <input
+                      type="text"
+                      value={returnReason}
+                      onChange={(e) => setReturnReason(e.target.value)}
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm min-h-touch"
+                      placeholder="Reason for return"
+                    />
+                  </div>
+
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => void submitSalesReturn()}
+                      disabled={isSubmittingReturn}
+                      className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:bg-emerald-300 min-h-touch"
+                    >
+                      {isSubmittingReturn ? 'Saving...' : 'Create Sales Return'}
+                    </button>
+                  </div>
+                </>
               )}
             </div>
           </div>

@@ -9,10 +9,14 @@ use crate::commands::purchase::SupplierInput;
 use crate::error::AppError;
 use bcrypt::{hash, DEFAULT_COST};
 use rusqlite::{params, Connection, OptionalExtension};
+use std::fs::{self, File};
+use std::io::Write;
 use std::path::PathBuf;
 use tauri::AppHandle;
+use zip::write::FileOptions;
 
 const INITIAL_MIGRATION_SQL: &str = include_str!("../../src/db/migrations/001_initial.sql");
+const PRINT_JOBS_MIGRATION_SQL: &str = include_str!("../../src/db/migrations/002_print_jobs.sql");
 
 #[derive(Clone, Debug)]
 pub struct UserRecord {
@@ -57,6 +61,26 @@ impl Database {
         Ok(db)
     }
 
+    #[cfg(test)]
+    pub fn init_for_test(db_path: PathBuf) -> Result<Self, AppError> {
+        let db = Self { db_path };
+        let conn = db.connection()?;
+        db.run_migrations(&conn)?;
+        db.seed_default_user_if_needed(&conn)?;
+        Ok(db)
+    }
+
+    #[cfg(test)]
+    pub fn role_id_by_name(&self, role_name: &str) -> Result<i64, AppError> {
+        let conn = self.connection()?;
+        conn.query_row(
+            "SELECT id FROM roles WHERE lower(name) = lower(?1)",
+            params![role_name],
+            |row| row.get(0),
+        )
+        .map_err(|e| AppError::Internal(e.to_string()))
+    }
+
     pub fn get_user_by_email(&self, email: &str) -> Result<UserRecord, AppError> {
         let identifier = email.trim().to_lowercase();
         let conn = self.connection()?;
@@ -84,6 +108,117 @@ impl Database {
         .optional()
         .map_err(|e| AppError::Internal(e.to_string()))?
         .ok_or(AppError::InvalidCredentials)
+    }
+
+    pub fn backup_create(&self, destination: Option<&str>) -> Result<String, AppError> {
+        let backup_dir = if let Some(raw) = destination {
+            let clean = raw.trim();
+            if clean.is_empty() {
+                std::env::current_dir()
+                    .map_err(|e| AppError::Internal(e.to_string()))?
+                    .join("backups")
+            } else {
+                PathBuf::from(clean)
+            }
+        } else {
+            std::env::current_dir()
+                .map_err(|e| AppError::Internal(e.to_string()))?
+                .join("backups")
+        };
+
+        fs::create_dir_all(&backup_dir).map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let stamp = chrono::Utc::now().format("%Y%m%d_%H%M%S").to_string();
+        let file_name = format!("pharmacare_backup_{}.db", stamp);
+        let target = backup_dir.join(file_name);
+
+        fs::copy(&self.db_path, &target).map_err(|e| AppError::Internal(e.to_string()))?;
+        Ok(target.to_string_lossy().to_string())
+    }
+
+    pub fn backup_list(&self) -> Result<Vec<serde_json::Value>, AppError> {
+        let backup_dir = std::env::current_dir()
+            .map_err(|e| AppError::Internal(e.to_string()))?
+            .join("backups");
+
+        if !backup_dir.exists() {
+            return Ok(vec![]);
+        }
+
+        let mut rows = Vec::new();
+        let entries = fs::read_dir(&backup_dir).map_err(|e| AppError::Internal(e.to_string()))?;
+        for entry in entries {
+            let entry = entry.map_err(|e| AppError::Internal(e.to_string()))?;
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+
+            if path.extension().and_then(|ext| ext.to_str()) != Some("db") {
+                continue;
+            }
+
+            let metadata = entry
+                .metadata()
+                .map_err(|e| AppError::Internal(e.to_string()))?;
+
+            rows.push(serde_json::json!({
+                "file_name": path.file_name().and_then(|v| v.to_str()).unwrap_or_default(),
+                "file_path": path.to_string_lossy().to_string(),
+                "size_bytes": metadata.len(),
+                "modified_at": metadata
+                    .modified()
+                    .ok()
+                    .and_then(|value| value.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs())
+                    .unwrap_or_default(),
+            }));
+        }
+
+        rows.sort_by(|a, b| {
+            let a_ts = a
+                .get("modified_at")
+                .and_then(|v| v.as_u64())
+                .unwrap_or_default();
+            let b_ts = b
+                .get("modified_at")
+                .and_then(|v| v.as_u64())
+                .unwrap_or_default();
+            b_ts.cmp(&a_ts)
+        });
+
+        Ok(rows)
+    }
+
+    pub fn backup_restore(&self, backup_path: &str, user_id: i64) -> Result<(), AppError> {
+        let source = PathBuf::from(backup_path.trim());
+        if !source.exists() || !source.is_file() {
+            return Err(AppError::Validation("Backup file not found.".to_string()));
+        }
+
+        let pre_restore = self
+            .db_path
+            .with_file_name(format!("pharmacare_pre_restore_{}.db", chrono::Utc::now().format("%Y%m%d_%H%M%S")));
+        let _ = fs::copy(&self.db_path, &pre_restore);
+
+        fs::copy(&source, &self.db_path).map_err(|e| AppError::Internal(e.to_string()))?;
+
+        self.write_audit_log(
+            "BACKUP_RESTORE",
+            "backup",
+            &source.to_string_lossy(),
+            None,
+            Some(
+                &serde_json::json!({
+                    "restored_by": user_id,
+                    "restored_at": chrono::Utc::now().to_rfc3339(),
+                })
+                .to_string(),
+            ),
+            &format!("user:{}", user_id),
+        )?;
+
+        Ok(())
     }
 
     pub fn update_login_attempts(
@@ -838,6 +973,264 @@ impl Database {
         Ok(())
     }
 
+    pub fn create_bill_return(
+        &self,
+        original_bill_id: i64,
+        items: &serde_json::Value,
+        reason: &str,
+        user_id: i64,
+    ) -> Result<i64, AppError> {
+        #[derive(serde::Deserialize)]
+        struct ReturnLineInput {
+            bill_item_id: Option<i64>,
+            batch_id: Option<i64>,
+            quantity: i64,
+        }
+
+        let parsed_items: Vec<ReturnLineInput> = serde_json::from_value(items.clone())
+            .map_err(|_| AppError::Validation("Invalid return items payload.".to_string()))?;
+
+        if parsed_items.is_empty() {
+            return Err(AppError::Validation(
+                "At least one return item is required.".to_string(),
+            ));
+        }
+
+        let mut conn = self.connection()?;
+        let tx = conn
+            .transaction()
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let (bill_status, customer_id): (String, Option<i64>) = tx
+            .query_row(
+                "SELECT status, customer_id FROM bills WHERE id = ?1",
+                params![original_bill_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .map_err(|e| AppError::Internal(e.to_string()))?
+            .ok_or_else(|| AppError::Validation("Original bill not found.".to_string()))?;
+
+        if bill_status != "active" {
+            return Err(AppError::Validation(
+                "Only active bills can be returned.".to_string(),
+            ));
+        }
+
+        let month_key = chrono::Utc::now().format("%Y%m").to_string();
+        let return_number_like = format!("SR-{}-%", month_key);
+        let max_seq: i64 = tx
+            .query_row(
+                "SELECT COALESCE(MAX(CAST(SUBSTR(return_number, -5) AS INTEGER)), 0)
+                 FROM sale_returns
+                 WHERE return_number LIKE ?1",
+                params![return_number_like],
+                |row| row.get(0),
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+        let return_number = format!("SR-{}-{:05}", month_key, max_seq + 1);
+
+        let mut total_amount = 0.0_f64;
+        let mut resolved_lines: Vec<(i64, i64, i64, f64, f64, f64)> = Vec::new();
+
+        for item in parsed_items {
+            if item.quantity <= 0 {
+                return Err(AppError::Validation(
+                    "Return quantity must be greater than zero.".to_string(),
+                ));
+            }
+
+            let bill_item_id = if let Some(id) = item.bill_item_id {
+                id
+            } else if let Some(batch_id) = item.batch_id {
+                tx.query_row(
+                    "SELECT id FROM bill_items WHERE bill_id = ?1 AND batch_id = ?2 ORDER BY id ASC LIMIT 1",
+                    params![original_bill_id, batch_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .optional()
+                .map_err(|e| AppError::Internal(e.to_string()))?
+                .ok_or_else(|| {
+                    AppError::Validation("Return item does not belong to original bill.".to_string())
+                })?
+            } else {
+                return Err(AppError::Validation(
+                    "Each return item must include bill_item_id or batch_id.".to_string(),
+                ));
+            };
+
+            let (source_bill_id, batch_id, sold_qty, unit_price, gst_rate, line_total):
+                (i64, i64, i64, f64, f64, f64) = tx
+                .query_row(
+                    "SELECT bill_id, batch_id, quantity, unit_price, gst_rate, total_amount
+                     FROM bill_items
+                     WHERE id = ?1",
+                    params![bill_item_id],
+                    |row| {
+                        Ok((
+                            row.get(0)?,
+                            row.get(1)?,
+                            row.get(2)?,
+                            row.get(3)?,
+                            row.get(4)?,
+                            row.get(5)?,
+                        ))
+                    },
+                )
+                .optional()
+                .map_err(|e| AppError::Internal(e.to_string()))?
+                .ok_or_else(|| AppError::Validation("Bill item not found for return.".to_string()))?;
+
+            if source_bill_id != original_bill_id {
+                return Err(AppError::Validation(
+                    "Return item does not belong to original bill.".to_string(),
+                ));
+            }
+
+            let already_returned: i64 = tx
+                .query_row(
+                    "SELECT COALESCE(SUM(sri.quantity), 0)
+                     FROM sale_return_items sri
+                     JOIN sale_returns sr ON sr.id = sri.return_id
+                     WHERE sr.original_bill_id = ?1
+                       AND sri.bill_item_id = ?2",
+                    params![original_bill_id, bill_item_id],
+                    |row| row.get(0),
+                )
+                .map_err(|e| AppError::Internal(e.to_string()))?;
+
+            if already_returned + item.quantity > sold_qty {
+                return Err(AppError::Validation(
+                    "Return quantity exceeds sold quantity for one of the items.".to_string(),
+                ));
+            }
+
+            let per_unit_total = if sold_qty > 0 {
+                line_total / sold_qty as f64
+            } else {
+                0.0
+            };
+            let return_total = per_unit_total * item.quantity as f64;
+            total_amount += return_total;
+            resolved_lines.push((bill_item_id, batch_id, item.quantity, unit_price, gst_rate, return_total));
+        }
+
+        tx.execute(
+            "INSERT INTO sale_returns (
+                return_number, original_bill_id, customer_id, return_date,
+                reason, total_amount, refund_mode, created_by
+             ) VALUES (?1, ?2, ?3, datetime('now'), ?4, ?5, ?6, ?7)",
+            params![
+                return_number,
+                original_bill_id,
+                customer_id,
+                reason,
+                total_amount,
+                "cash",
+                user_id,
+            ],
+        )
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let return_id = tx.last_insert_rowid();
+
+        for (bill_item_id, batch_id, quantity, unit_price, gst_rate, line_total) in resolved_lines {
+            tx.execute(
+                "INSERT INTO sale_return_items (
+                    return_id, bill_item_id, batch_id, quantity, unit_price, gst_rate, total_amount
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![
+                    return_id,
+                    bill_item_id,
+                    batch_id,
+                    quantity,
+                    unit_price,
+                    gst_rate,
+                    line_total,
+                ],
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+            tx.execute(
+                "UPDATE batches
+                 SET quantity_sold = CASE WHEN quantity_sold - ?1 < 0 THEN 0 ELSE quantity_sold - ?1 END,
+                     updated_at = datetime('now')
+                 WHERE id = ?2",
+                params![quantity, batch_id],
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+        }
+
+        tx.execute(
+            "INSERT INTO audit_log (user_id, user_name, action, module, record_id, old_value, new_value, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                user_id,
+                format!("user:{}", user_id),
+                "BILL_RETURN_CREATED",
+                "billing",
+                return_id.to_string(),
+                Option::<String>::None,
+                serde_json::json!({
+                    "original_bill_id": original_bill_id,
+                    "total_amount": total_amount,
+                    "reason": reason,
+                })
+                .to_string(),
+                chrono::Utc::now().to_rfc3339(),
+            ],
+        )
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        tx.commit().map_err(|e| AppError::Internal(e.to_string()))?;
+        Ok(return_id)
+    }
+
+    pub fn list_bill_returns(&self, limit: i64) -> Result<serde_json::Value, AppError> {
+        let conn = self.connection()?;
+        let safe_limit = limit.clamp(1, 100);
+
+        let mut stmt = conn
+            .prepare(
+                "SELECT
+                    sr.id,
+                    sr.return_number,
+                    sr.original_bill_id,
+                    COALESCE(b.bill_number, '') AS original_bill_number,
+                    sr.total_amount,
+                    COALESCE(sr.reason, '') AS reason,
+                    sr.return_date,
+                    sr.created_at
+                 FROM sale_returns sr
+                 LEFT JOIN bills b ON b.id = sr.original_bill_id
+                 ORDER BY datetime(sr.created_at) DESC, sr.id DESC
+                 LIMIT ?1",
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let rows = stmt
+            .query_map(params![safe_limit], |row| {
+                Ok(serde_json::json!({
+                    "id": row.get::<_, i64>(0)?,
+                    "return_number": row.get::<_, String>(1)?,
+                    "original_bill_id": row.get::<_, i64>(2)?,
+                    "original_bill_number": row.get::<_, String>(3)?,
+                    "total_amount": row.get::<_, f64>(4)?,
+                    "reason": row.get::<_, String>(5)?,
+                    "return_date": row.get::<_, String>(6)?,
+                    "created_at": row.get::<_, String>(7)?,
+                }))
+            })
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let mut items = Vec::new();
+        for row in rows {
+            items.push(row.map_err(|e| AppError::Internal(e.to_string()))?);
+        }
+
+        Ok(serde_json::Value::Array(items))
+    }
+
     pub fn get_today_summary(&self) -> Result<serde_json::Value, AppError> {
         let conn = self.connection()?;
 
@@ -877,6 +1270,1439 @@ impl Database {
             "card_amount": payment_total_for_mode("card")?,
             "credit_amount": payment_total_for_mode("credit")?,
         }))
+    }
+
+    pub fn ai_get_morning_briefing(&self) -> Result<serde_json::Value, AppError> {
+        let conn = self.connection()?;
+
+        let low_stock_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(1)
+                 FROM medicines m
+                 WHERE m.is_active = 1
+                   AND m.deleted_at IS NULL
+                   AND COALESCE((
+                     SELECT SUM(b.quantity_in - b.quantity_sold - b.quantity_adjusted)
+                     FROM batches b
+                     WHERE b.medicine_id = m.id AND b.is_active = 1
+                   ), 0) < m.reorder_level",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let expiry_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(1)
+                 FROM batches b
+                 WHERE b.is_active = 1
+                   AND (b.quantity_in - b.quantity_sold - b.quantity_adjusted) > 0
+                   AND date(b.expiry_date) <= date('now', '+30 day')",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let outstanding_customers: i64 = conn
+            .query_row(
+                "SELECT COUNT(1) FROM customers WHERE is_active = 1 AND outstanding_balance > 0",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let mut actions = Vec::new();
+        if low_stock_count > 0 {
+            actions.push(serde_json::json!({
+                "priority": "urgent",
+                "icon": "pill",
+                "message": format!("{} medicines are below reorder level.", low_stock_count),
+                "link": "/medicine"
+            }));
+        }
+        if expiry_count > 0 {
+            actions.push(serde_json::json!({
+                "priority": "important",
+                "icon": "alert",
+                "message": format!("{} batches are expiring within 30 days.", expiry_count),
+                "link": "/expiry"
+            }));
+        }
+        if outstanding_customers > 0 {
+            actions.push(serde_json::json!({
+                "priority": "info",
+                "icon": "users",
+                "message": format!("{} customers have outstanding balances.", outstanding_customers),
+                "link": "/customers"
+            }));
+        }
+        if actions.is_empty() {
+            actions.push(serde_json::json!({
+                "priority": "info",
+                "icon": "check",
+                "message": "No urgent operational alerts this morning.",
+                "link": "/dashboard"
+            }));
+        }
+
+        Ok(serde_json::json!({ "actions": actions }))
+    }
+
+    pub fn ai_get_demand_forecast(&self) -> Result<serde_json::Value, AppError> {
+        let conn = self.connection()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT
+                    m.id,
+                    m.name,
+                    COALESCE(SUM(CASE WHEN date(b.bill_date) >= date('now', '-30 day') THEN bi.quantity ELSE 0 END), 0) AS qty_30,
+                    COALESCE(SUM(CASE WHEN date(b.bill_date) >= date('now', '-90 day') THEN bi.quantity ELSE 0 END), 0) AS qty_90,
+                    COALESCE(SUM(bt.quantity_in - bt.quantity_sold - bt.quantity_adjusted), 0) AS current_stock
+                 FROM medicines m
+                 LEFT JOIN bill_items bi ON bi.medicine_id = m.id
+                 LEFT JOIN bills b ON b.id = bi.bill_id AND b.status = 'active'
+                 LEFT JOIN batches bt ON bt.medicine_id = m.id AND bt.is_active = 1
+                 WHERE m.is_active = 1 AND m.deleted_at IS NULL
+                 GROUP BY m.id, m.name
+                 ORDER BY qty_30 DESC
+                 LIMIT 30",
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let mapped = stmt
+            .query_map([], |row| {
+                let qty_30 = row.get::<_, i64>(2)? as f64;
+                let qty_90 = row.get::<_, i64>(3)? as f64;
+                let current_stock = row.get::<_, i64>(4)?;
+                let forecast_30 = ((qty_90 / 3.0) * 1.1).round() as i64;
+                let recommended_order = (forecast_30 - current_stock).max(0);
+                let trend = if qty_30 > (qty_90 / 3.0) * 1.1 {
+                    "up"
+                } else if qty_30 < (qty_90 / 3.0) * 0.9 {
+                    "down"
+                } else {
+                    "stable"
+                };
+
+                Ok(serde_json::json!({
+                    "medicine_id": row.get::<_, i64>(0)?,
+                    "medicine_name": row.get::<_, String>(1)?,
+                    "current_stock": current_stock,
+                    "forecast_30day": forecast_30,
+                    "recommended_order": recommended_order,
+                    "confidence": if qty_90 > 0.0 { 0.72 } else { 0.4 },
+                    "trend": trend,
+                }))
+            })
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let mut rows = Vec::new();
+        for row in mapped {
+            rows.push(row.map_err(|e| AppError::Internal(e.to_string()))?);
+        }
+        Ok(serde_json::Value::Array(rows))
+    }
+
+    pub fn ai_get_expiry_risks(&self) -> Result<serde_json::Value, AppError> {
+        let conn = self.connection()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT
+                    b.id,
+                    CAST(julianday(b.expiry_date) - julianday('now') AS INTEGER) AS days_to_expiry,
+                    (b.quantity_in - b.quantity_sold - b.quantity_adjusted) AS qty_on_hand
+                 FROM batches b
+                 WHERE b.is_active = 1
+                   AND (b.quantity_in - b.quantity_sold - b.quantity_adjusted) > 0",
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let mapped = stmt
+            .query_map([], |row| {
+                let days = row.get::<_, i64>(1)?;
+                let qty = row.get::<_, i64>(2)?;
+                let risk_score = if days <= 0 {
+                    95.0
+                } else if days <= 30 {
+                    80.0 + (qty as f64 / 10.0).min(15.0)
+                } else if days <= 90 {
+                    50.0 + (qty as f64 / 20.0).min(20.0)
+                } else {
+                    20.0 + (qty as f64 / 40.0).min(20.0)
+                };
+                let level = if risk_score >= 85.0 {
+                    "critical"
+                } else if risk_score >= 70.0 {
+                    "high"
+                } else if risk_score >= 45.0 {
+                    "medium"
+                } else {
+                    "low"
+                };
+
+                Ok(serde_json::json!({
+                    "batch_id": row.get::<_, i64>(0)?,
+                    "risk_score": risk_score,
+                    "risk_level": level,
+                    "sellable_days": days,
+                    "action_suggested": if level == "critical" { "Return/discount immediately" } else if level == "high" { "Promote fast moving sale" } else { "Monitor" },
+                }))
+            })
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let mut rows = Vec::new();
+        for row in mapped {
+            rows.push(row.map_err(|e| AppError::Internal(e.to_string()))?);
+        }
+        Ok(serde_json::Value::Array(rows))
+    }
+
+    pub fn ai_get_customer_segments(&self) -> Result<serde_json::Value, AppError> {
+        let conn = self.connection()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT
+                    c.id,
+                    c.name,
+                    COALESCE(MAX(date(b.bill_date)), ''),
+                    COALESCE(SUM(CASE WHEN date(b.bill_date) >= date('now', '-90 day') THEN b.net_amount ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN date(b.bill_date) >= date('now', '-90 day') THEN 1 ELSE 0 END), 0),
+                    COALESCE(CAST(julianday('now') - julianday(MAX(date(b.bill_date))) AS INTEGER), 999)
+                 FROM customers c
+                 LEFT JOIN bills b ON b.customer_id = c.id AND b.status = 'active'
+                 WHERE c.is_active = 1
+                 GROUP BY c.id, c.name
+                 ORDER BY c.name ASC",
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let mapped = stmt
+            .query_map([], |row| {
+                let spend_90 = row.get::<_, f64>(3)?;
+                let count_90 = row.get::<_, i64>(4)?;
+                let days_since = row.get::<_, i64>(5)?;
+
+                let segment = if count_90 >= 6 && spend_90 >= 5000.0 {
+                    "champion"
+                } else if count_90 >= 3 {
+                    "loyal"
+                } else if days_since > 90 {
+                    "dormant"
+                } else if days_since > 45 {
+                    "at_risk"
+                } else {
+                    "new"
+                };
+
+                Ok(serde_json::json!({
+                    "customer_id": row.get::<_, i64>(0)?,
+                    "customer_name": row.get::<_, String>(1)?,
+                    "segment": segment,
+                    "last_purchase_days": days_since,
+                    "avg_monthly_spend": spend_90 / 3.0,
+                    "purchase_count_90d": count_90,
+                }))
+            })
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let mut rows = Vec::new();
+        for row in mapped {
+            rows.push(row.map_err(|e| AppError::Internal(e.to_string()))?);
+        }
+        Ok(serde_json::Value::Array(rows))
+    }
+
+    pub fn ai_get_anomalies(&self) -> Result<serde_json::Value, AppError> {
+        let conn = self.connection()?;
+
+        let mut anomalies = Vec::new();
+
+        let mut discount_stmt = conn
+            .prepare(
+                "SELECT id, bill_id, medicine_name, discount_percent
+                 FROM bill_items
+                 WHERE discount_percent >= 35
+                 ORDER BY discount_percent DESC
+                 LIMIT 25",
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+        let discount_rows = discount_stmt
+            .query_map([], |row| {
+                Ok(serde_json::json!({
+                    "id": row.get::<_, i64>(0)?,
+                    "anomaly_type": "high_discount",
+                    "severity": "medium",
+                    "description": format!(
+                        "Bill item {} in bill {} has high discount ({}%).",
+                        row.get::<_, String>(2)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, f64>(3)?
+                    ),
+                    "record_type": "bill_item",
+                    "record_id": row.get::<_, i64>(0)?,
+                    "is_reviewed": false,
+                    "detected_at": chrono::Utc::now().to_rfc3339(),
+                }))
+            })
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+        for row in discount_rows {
+            anomalies.push(row.map_err(|e| AppError::Internal(e.to_string()))?);
+        }
+
+        let mut below_cost_stmt = conn
+            .prepare(
+                "SELECT bi.id, bi.bill_id, bi.medicine_name, bi.unit_price, COALESCE(b.purchase_price, 0)
+                 FROM bill_items bi
+                 LEFT JOIN batches b ON b.id = bi.batch_id
+                 WHERE bi.unit_price < COALESCE(b.purchase_price, 0)
+                 ORDER BY bi.id DESC
+                 LIMIT 25",
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+        let below_cost_rows = below_cost_stmt
+            .query_map([], |row| {
+                Ok(serde_json::json!({
+                    "id": row.get::<_, i64>(0)?,
+                    "anomaly_type": "below_cost_sale",
+                    "severity": "high",
+                    "description": format!(
+                        "Bill item {} in bill {} sold below purchase cost.",
+                        row.get::<_, String>(2)?,
+                        row.get::<_, i64>(1)?
+                    ),
+                    "record_type": "bill_item",
+                    "record_id": row.get::<_, i64>(0)?,
+                    "is_reviewed": false,
+                    "detected_at": chrono::Utc::now().to_rfc3339(),
+                }))
+            })
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+        for row in below_cost_rows {
+            anomalies.push(row.map_err(|e| AppError::Internal(e.to_string()))?);
+        }
+
+        Ok(serde_json::Value::Array(anomalies))
+    }
+
+    pub fn reports_sales(
+        &self,
+        from_date: &str,
+        to_date: &str,
+    ) -> Result<serde_json::Value, AppError> {
+        let from = from_date.trim();
+        let to = to_date.trim();
+
+        if from.is_empty() || to.is_empty() {
+            return Err(AppError::Validation(
+                "From date and to date are required.".to_string(),
+            ));
+        }
+
+        let conn = self.connection()?;
+
+        let (total_bills, total_quantity, gross_sales, total_discount, net_sales, avg_bill_value):
+            (i64, i64, f64, f64, f64, f64) = conn
+            .query_row(
+                "SELECT
+                    COUNT(1),
+                    COALESCE(SUM((SELECT COALESCE(SUM(quantity), 0) FROM bill_items bi WHERE bi.bill_id = b.id)), 0),
+                    COALESCE(SUM(b.total_amount), 0),
+                    COALESCE(SUM(b.discount_amount), 0),
+                    COALESCE(SUM(b.net_amount), 0),
+                    COALESCE(AVG(b.net_amount), 0)
+                 FROM bills b
+                 WHERE b.status = 'active'
+                   AND date(b.bill_date) BETWEEN date(?1) AND date(?2)",
+                params![from, to],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ))
+                },
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let mut daily_stmt = conn
+            .prepare(
+                "SELECT
+                    date(b.bill_date) AS report_date,
+                    COUNT(1) AS bill_count,
+                    COALESCE(SUM(b.net_amount), 0) AS net_sales,
+                    COALESCE(SUM(b.total_amount), 0) AS gross_sales,
+                    COALESCE(SUM(b.discount_amount), 0) AS discount_amount
+                 FROM bills b
+                 WHERE b.status = 'active'
+                   AND date(b.bill_date) BETWEEN date(?1) AND date(?2)
+                 GROUP BY date(b.bill_date)
+                 ORDER BY report_date ASC",
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let daily_rows = daily_stmt
+            .query_map(params![from, to], |row| {
+                Ok(serde_json::json!({
+                    "report_date": row.get::<_, String>(0)?,
+                    "bill_count": row.get::<_, i64>(1)?,
+                    "net_sales": row.get::<_, f64>(2)?,
+                    "gross_sales": row.get::<_, f64>(3)?,
+                    "discount_amount": row.get::<_, f64>(4)?,
+                }))
+            })
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let mut daily = Vec::new();
+        for row in daily_rows {
+            daily.push(row.map_err(|e| AppError::Internal(e.to_string()))?);
+        }
+
+        let mut payment_stmt = conn
+            .prepare(
+                "SELECT
+                    p.payment_mode,
+                    COALESCE(SUM(p.amount), 0) AS total_amount
+                 FROM payments p
+                 JOIN bills b ON b.id = p.bill_id
+                 WHERE b.status = 'active'
+                   AND date(b.bill_date) BETWEEN date(?1) AND date(?2)
+                 GROUP BY p.payment_mode
+                 ORDER BY total_amount DESC",
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let payment_rows = payment_stmt
+            .query_map(params![from, to], |row| {
+                Ok(serde_json::json!({
+                    "payment_mode": row.get::<_, String>(0)?,
+                    "total_amount": row.get::<_, f64>(1)?,
+                }))
+            })
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let mut payment_breakdown = Vec::new();
+        for row in payment_rows {
+            payment_breakdown.push(row.map_err(|e| AppError::Internal(e.to_string()))?);
+        }
+
+        let mut top_medicine_stmt = conn
+            .prepare(
+                "SELECT
+                    bi.medicine_name,
+                    COALESCE(SUM(bi.quantity), 0) AS total_quantity,
+                    COALESCE(SUM(bi.total_amount), 0) AS total_amount
+                 FROM bill_items bi
+                 JOIN bills b ON b.id = bi.bill_id
+                 WHERE b.status = 'active'
+                   AND date(b.bill_date) BETWEEN date(?1) AND date(?2)
+                 GROUP BY bi.medicine_name
+                 ORDER BY total_amount DESC
+                 LIMIT 10",
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let top_medicine_rows = top_medicine_stmt
+            .query_map(params![from, to], |row| {
+                Ok(serde_json::json!({
+                    "medicine_name": row.get::<_, String>(0)?,
+                    "total_quantity": row.get::<_, i64>(1)?,
+                    "total_amount": row.get::<_, f64>(2)?,
+                }))
+            })
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let mut top_medicines = Vec::new();
+        for row in top_medicine_rows {
+            top_medicines.push(row.map_err(|e| AppError::Internal(e.to_string()))?);
+        }
+
+        Ok(serde_json::json!({
+            "summary": {
+                "from_date": from,
+                "to_date": to,
+                "total_bills": total_bills,
+                "total_quantity": total_quantity,
+                "gross_sales": gross_sales,
+                "total_discount": total_discount,
+                "net_sales": net_sales,
+                "avg_bill_value": avg_bill_value,
+            },
+            "daily": daily,
+            "payment_breakdown": payment_breakdown,
+            "top_medicines": top_medicines,
+        }))
+    }
+
+    pub fn reports_purchase(
+        &self,
+        from_date: &str,
+        to_date: &str,
+        supplier_id: Option<i64>,
+    ) -> Result<serde_json::Value, AppError> {
+        let from = from_date.trim();
+        let to = to_date.trim();
+
+        if from.is_empty() || to.is_empty() {
+            return Err(AppError::Validation(
+                "From date and to date are required.".to_string(),
+            ));
+        }
+
+        let conn = self.connection()?;
+
+        let (
+            total_bills,
+            total_quantity,
+            gross_purchase,
+            total_discount,
+            net_purchase,
+            avg_bill_value,
+        ): (i64, i64, f64, f64, f64, f64) = conn
+            .query_row(
+                "SELECT
+                    COUNT(1),
+                    COALESCE(SUM((SELECT COALESCE(SUM(quantity + free_quantity), 0) FROM purchase_bill_items pbi WHERE pbi.purchase_bill_id = pb.id)), 0),
+                    COALESCE(SUM(pb.subtotal), 0),
+                    COALESCE(SUM(pb.discount_amount), 0),
+                    COALESCE(SUM(pb.total_amount), 0),
+                    COALESCE(AVG(pb.total_amount), 0)
+                 FROM purchase_bills pb
+                 WHERE date(pb.bill_date) BETWEEN date(?1) AND date(?2)
+                   AND (?3 IS NULL OR pb.supplier_id = ?3)",
+                params![from, to, supplier_id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ))
+                },
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let mut daily_stmt = conn
+            .prepare(
+                "SELECT
+                    date(pb.bill_date) AS report_date,
+                    COUNT(1) AS bill_count,
+                    COALESCE(SUM(pb.total_amount), 0) AS net_purchase,
+                    COALESCE(SUM(pb.subtotal), 0) AS gross_purchase,
+                    COALESCE(SUM(pb.discount_amount), 0) AS discount_amount
+                 FROM purchase_bills pb
+                 WHERE date(pb.bill_date) BETWEEN date(?1) AND date(?2)
+                   AND (?3 IS NULL OR pb.supplier_id = ?3)
+                 GROUP BY date(pb.bill_date)
+                 ORDER BY report_date ASC",
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let daily_rows = daily_stmt
+            .query_map(params![from, to, supplier_id], |row| {
+                Ok(serde_json::json!({
+                    "report_date": row.get::<_, String>(0)?,
+                    "bill_count": row.get::<_, i64>(1)?,
+                    "net_purchase": row.get::<_, f64>(2)?,
+                    "gross_purchase": row.get::<_, f64>(3)?,
+                    "discount_amount": row.get::<_, f64>(4)?,
+                }))
+            })
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let mut daily = Vec::new();
+        for row in daily_rows {
+            daily.push(row.map_err(|e| AppError::Internal(e.to_string()))?);
+        }
+
+        let mut supplier_stmt = conn
+            .prepare(
+                "SELECT
+                    pb.supplier_id,
+                    COALESCE(s.name, 'Unknown Supplier') AS supplier_name,
+                    COUNT(1) AS bill_count,
+                    COALESCE(SUM(pb.total_amount), 0) AS total_amount
+                 FROM purchase_bills pb
+                 LEFT JOIN suppliers s ON s.id = pb.supplier_id
+                 WHERE date(pb.bill_date) BETWEEN date(?1) AND date(?2)
+                   AND (?3 IS NULL OR pb.supplier_id = ?3)
+                 GROUP BY pb.supplier_id, COALESCE(s.name, 'Unknown Supplier')
+                 ORDER BY total_amount DESC",
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let supplier_rows = supplier_stmt
+            .query_map(params![from, to, supplier_id], |row| {
+                Ok(serde_json::json!({
+                    "supplier_id": row.get::<_, i64>(0)?,
+                    "supplier_name": row.get::<_, String>(1)?,
+                    "bill_count": row.get::<_, i64>(2)?,
+                    "total_amount": row.get::<_, f64>(3)?,
+                }))
+            })
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let mut supplier_breakdown = Vec::new();
+        for row in supplier_rows {
+            supplier_breakdown.push(row.map_err(|e| AppError::Internal(e.to_string()))?);
+        }
+
+        let mut top_medicine_stmt = conn
+            .prepare(
+                "SELECT
+                    COALESCE(m.name, pbi.batch_number) AS medicine_name,
+                    COALESCE(SUM(pbi.quantity + pbi.free_quantity), 0) AS total_quantity,
+                    COALESCE(SUM(pbi.total_amount), 0) AS total_amount
+                 FROM purchase_bill_items pbi
+                 JOIN purchase_bills pb ON pb.id = pbi.purchase_bill_id
+                 LEFT JOIN medicines m ON m.id = pbi.medicine_id
+                 WHERE date(pb.bill_date) BETWEEN date(?1) AND date(?2)
+                   AND (?3 IS NULL OR pb.supplier_id = ?3)
+                 GROUP BY COALESCE(m.name, pbi.batch_number)
+                 ORDER BY total_amount DESC
+                 LIMIT 10",
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let top_medicine_rows = top_medicine_stmt
+            .query_map(params![from, to, supplier_id], |row| {
+                Ok(serde_json::json!({
+                    "medicine_name": row.get::<_, String>(0)?,
+                    "total_quantity": row.get::<_, i64>(1)?,
+                    "total_amount": row.get::<_, f64>(2)?,
+                }))
+            })
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let mut top_medicines = Vec::new();
+        for row in top_medicine_rows {
+            top_medicines.push(row.map_err(|e| AppError::Internal(e.to_string()))?);
+        }
+
+        Ok(serde_json::json!({
+            "summary": {
+                "from_date": from,
+                "to_date": to,
+                "total_bills": total_bills,
+                "total_quantity": total_quantity,
+                "gross_purchase": gross_purchase,
+                "total_discount": total_discount,
+                "net_purchase": net_purchase,
+                "avg_bill_value": avg_bill_value,
+            },
+            "daily": daily,
+            "supplier_breakdown": supplier_breakdown,
+            "top_medicines": top_medicines,
+        }))
+    }
+
+    pub fn reports_stock(&self) -> Result<serde_json::Value, AppError> {
+        let conn = self.connection()?;
+
+        let (total_lines, total_units, purchase_value, selling_value): (i64, i64, f64, f64) = conn
+            .query_row(
+                "SELECT
+                    COUNT(1),
+                    COALESCE(SUM(CASE WHEN (b.quantity_in - b.quantity_sold - b.quantity_adjusted) > 0 THEN (b.quantity_in - b.quantity_sold - b.quantity_adjusted) ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN (b.quantity_in - b.quantity_sold - b.quantity_adjusted) > 0 THEN (b.quantity_in - b.quantity_sold - b.quantity_adjusted) * b.purchase_price ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN (b.quantity_in - b.quantity_sold - b.quantity_adjusted) > 0 THEN (b.quantity_in - b.quantity_sold - b.quantity_adjusted) * b.selling_price ELSE 0 END), 0)
+                 FROM batches b
+                 WHERE b.is_active = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let mut stmt = conn
+            .prepare(
+                "SELECT
+                    m.id,
+                    m.name,
+                    COALESCE(SUM(CASE WHEN (b.quantity_in - b.quantity_sold - b.quantity_adjusted) > 0 THEN (b.quantity_in - b.quantity_sold - b.quantity_adjusted) ELSE 0 END), 0) AS qty_on_hand,
+                    COALESCE(SUM(CASE WHEN (b.quantity_in - b.quantity_sold - b.quantity_adjusted) > 0 THEN (b.quantity_in - b.quantity_sold - b.quantity_adjusted) * b.purchase_price ELSE 0 END), 0) AS purchase_value,
+                    COALESCE(SUM(CASE WHEN (b.quantity_in - b.quantity_sold - b.quantity_adjusted) > 0 THEN (b.quantity_in - b.quantity_sold - b.quantity_adjusted) * b.selling_price ELSE 0 END), 0) AS selling_value,
+                    COUNT(b.id) AS batch_count
+                 FROM medicines m
+                 JOIN batches b ON b.medicine_id = m.id
+                 WHERE m.deleted_at IS NULL
+                   AND m.is_active = 1
+                   AND b.is_active = 1
+                 GROUP BY m.id, m.name
+                 HAVING qty_on_hand > 0
+                 ORDER BY purchase_value DESC",
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(serde_json::json!({
+                    "medicine_id": row.get::<_, i64>(0)?,
+                    "medicine_name": row.get::<_, String>(1)?,
+                    "quantity_on_hand": row.get::<_, i64>(2)?,
+                    "purchase_value": row.get::<_, f64>(3)?,
+                    "selling_value": row.get::<_, f64>(4)?,
+                    "batch_count": row.get::<_, i64>(5)?,
+                }))
+            })
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let mut items = Vec::new();
+        for row in rows {
+            items.push(row.map_err(|e| AppError::Internal(e.to_string()))?);
+        }
+
+        Ok(serde_json::json!({
+            "summary": {
+                "total_lines": total_lines,
+                "total_units": total_units,
+                "purchase_value": purchase_value,
+                "selling_value": selling_value,
+                "estimated_margin": selling_value - purchase_value,
+            },
+            "items": items,
+        }))
+    }
+
+    pub fn reports_gst(&self, from_date: &str, to_date: &str) -> Result<serde_json::Value, AppError> {
+        let from = from_date.trim();
+        let to = to_date.trim();
+
+        if from.is_empty() || to.is_empty() {
+            return Err(AppError::Validation(
+                "From date and to date are required.".to_string(),
+            ));
+        }
+
+        let conn = self.connection()?;
+
+        let (taxable_amount, cgst_amount, sgst_amount, igst_amount, total_invoice_value):
+            (f64, f64, f64, f64, f64) = conn
+            .query_row(
+                "SELECT
+                    COALESCE(SUM(b.taxable_amount), 0),
+                    COALESCE(SUM(b.cgst_amount), 0),
+                    COALESCE(SUM(b.sgst_amount), 0),
+                    COALESCE(SUM(b.igst_amount), 0),
+                    COALESCE(SUM(b.net_amount), 0)
+                 FROM bills b
+                 WHERE b.status = 'active'
+                   AND date(b.bill_date) BETWEEN date(?1) AND date(?2)",
+                params![from, to],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let mut daily_stmt = conn
+            .prepare(
+                "SELECT
+                    date(b.bill_date) AS report_date,
+                    COUNT(1) AS bill_count,
+                    COALESCE(SUM(b.taxable_amount), 0) AS taxable_amount,
+                    COALESCE(SUM(b.cgst_amount), 0) AS cgst_amount,
+                    COALESCE(SUM(b.sgst_amount), 0) AS sgst_amount,
+                    COALESCE(SUM(b.igst_amount), 0) AS igst_amount,
+                    COALESCE(SUM(b.net_amount), 0) AS invoice_value
+                 FROM bills b
+                 WHERE b.status = 'active'
+                   AND date(b.bill_date) BETWEEN date(?1) AND date(?2)
+                 GROUP BY date(b.bill_date)
+                 ORDER BY report_date ASC",
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let daily_rows = daily_stmt
+            .query_map(params![from, to], |row| {
+                Ok(serde_json::json!({
+                    "report_date": row.get::<_, String>(0)?,
+                    "bill_count": row.get::<_, i64>(1)?,
+                    "taxable_amount": row.get::<_, f64>(2)?,
+                    "cgst_amount": row.get::<_, f64>(3)?,
+                    "sgst_amount": row.get::<_, f64>(4)?,
+                    "igst_amount": row.get::<_, f64>(5)?,
+                    "invoice_value": row.get::<_, f64>(6)?,
+                }))
+            })
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let mut daily = Vec::new();
+        for row in daily_rows {
+            daily.push(row.map_err(|e| AppError::Internal(e.to_string()))?);
+        }
+
+        let mut hsn_stmt = conn
+            .prepare(
+                "SELECT
+                    COALESCE(NULLIF(TRIM(COALESCE(m.hsn_code, '')), ''), 'UNKNOWN') AS hsn_code,
+                    COUNT(DISTINCT bi.bill_id) AS bill_count,
+                    COALESCE(SUM(bi.total_amount - bi.cgst_amount - bi.sgst_amount - bi.igst_amount), 0) AS taxable_amount,
+                    COALESCE(SUM(bi.cgst_amount), 0) AS cgst_amount,
+                    COALESCE(SUM(bi.sgst_amount), 0) AS sgst_amount,
+                    COALESCE(SUM(bi.igst_amount), 0) AS igst_amount,
+                    COALESCE(SUM(bi.total_amount), 0) AS total_amount
+                 FROM bill_items bi
+                 JOIN bills b ON b.id = bi.bill_id
+                 LEFT JOIN medicines m ON m.id = bi.medicine_id
+                 WHERE b.status = 'active'
+                   AND date(b.bill_date) BETWEEN date(?1) AND date(?2)
+                 GROUP BY hsn_code
+                 ORDER BY total_amount DESC",
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let hsn_rows = hsn_stmt
+            .query_map(params![from, to], |row| {
+                Ok(serde_json::json!({
+                    "hsn_code": row.get::<_, String>(0)?,
+                    "bill_count": row.get::<_, i64>(1)?,
+                    "taxable_amount": row.get::<_, f64>(2)?,
+                    "cgst_amount": row.get::<_, f64>(3)?,
+                    "sgst_amount": row.get::<_, f64>(4)?,
+                    "igst_amount": row.get::<_, f64>(5)?,
+                    "total_amount": row.get::<_, f64>(6)?,
+                }))
+            })
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let mut hsn_summary = Vec::new();
+        for row in hsn_rows {
+            hsn_summary.push(row.map_err(|e| AppError::Internal(e.to_string()))?);
+        }
+
+        Ok(serde_json::json!({
+            "summary": {
+                "from_date": from,
+                "to_date": to,
+                "taxable_amount": taxable_amount,
+                "cgst_amount": cgst_amount,
+                "sgst_amount": sgst_amount,
+                "igst_amount": igst_amount,
+                "total_gst": cgst_amount + sgst_amount + igst_amount,
+                "total_invoice_value": total_invoice_value,
+            },
+            "daily": daily,
+            "hsn_summary": hsn_summary,
+        }))
+    }
+
+    pub fn reports_profit_loss(
+        &self,
+        from_date: &str,
+        to_date: &str,
+    ) -> Result<serde_json::Value, AppError> {
+        let from = from_date.trim();
+        let to = to_date.trim();
+
+        if from.is_empty() || to.is_empty() {
+            return Err(AppError::Validation(
+                "From date and to date are required.".to_string(),
+            ));
+        }
+
+        let conn = self.connection()?;
+
+        let (revenue, discounts, estimated_cogs): (f64, f64, f64) = conn
+            .query_row(
+                "SELECT
+                    COALESCE(SUM(b.net_amount), 0) AS revenue,
+                    COALESCE(SUM(b.discount_amount), 0) AS discounts,
+                    COALESCE(SUM(bi.quantity * COALESCE(bt.purchase_price, 0)), 0) AS estimated_cogs
+                 FROM bills b
+                 LEFT JOIN bill_items bi ON bi.bill_id = b.id
+                 LEFT JOIN batches bt ON bt.id = bi.batch_id
+                 WHERE b.status = 'active'
+                   AND date(b.bill_date) BETWEEN date(?1) AND date(?2)",
+                params![from, to],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let purchase_expense: f64 = conn
+            .query_row(
+                "SELECT COALESCE(SUM(pb.total_amount), 0)
+                 FROM purchase_bills pb
+                 WHERE date(pb.bill_date) BETWEEN date(?1) AND date(?2)",
+                params![from, to],
+                |row| row.get(0),
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let gross_profit = revenue - estimated_cogs;
+        let net_profit = gross_profit - (purchase_expense * 0.0);
+        let gross_margin_pct = if revenue > 0.0 {
+            (gross_profit / revenue) * 100.0
+        } else {
+            0.0
+        };
+
+        let mut daily_stmt = conn
+            .prepare(
+                "SELECT
+                    date(b.bill_date) AS report_date,
+                    COALESCE(SUM(b.net_amount), 0) AS revenue,
+                    COALESCE(SUM(b.discount_amount), 0) AS discounts,
+                    COALESCE(SUM(bi.quantity * COALESCE(bt.purchase_price, 0)), 0) AS estimated_cogs
+                 FROM bills b
+                 LEFT JOIN bill_items bi ON bi.bill_id = b.id
+                 LEFT JOIN batches bt ON bt.id = bi.batch_id
+                 WHERE b.status = 'active'
+                   AND date(b.bill_date) BETWEEN date(?1) AND date(?2)
+                 GROUP BY date(b.bill_date)
+                 ORDER BY report_date ASC",
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let daily_rows = daily_stmt
+            .query_map(params![from, to], |row| {
+                let revenue_row = row.get::<_, f64>(1)?;
+                let cogs_row = row.get::<_, f64>(3)?;
+                let gross_profit_row = revenue_row - cogs_row;
+                let gross_margin_pct_row = if revenue_row > 0.0 {
+                    (gross_profit_row / revenue_row) * 100.0
+                } else {
+                    0.0
+                };
+
+                Ok(serde_json::json!({
+                    "report_date": row.get::<_, String>(0)?,
+                    "revenue": revenue_row,
+                    "discounts": row.get::<_, f64>(2)?,
+                    "estimated_cogs": cogs_row,
+                    "gross_profit": gross_profit_row,
+                    "gross_margin_pct": gross_margin_pct_row,
+                }))
+            })
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let mut daily = Vec::new();
+        for row in daily_rows {
+            daily.push(row.map_err(|e| AppError::Internal(e.to_string()))?);
+        }
+
+        Ok(serde_json::json!({
+            "summary": {
+                "from_date": from,
+                "to_date": to,
+                "revenue": revenue,
+                "discounts": discounts,
+                "estimated_cogs": estimated_cogs,
+                "gross_profit": gross_profit,
+                "purchase_expense": purchase_expense,
+                "net_profit": net_profit,
+                "gross_margin_pct": gross_margin_pct,
+            },
+            "daily": daily,
+        }))
+    }
+
+    pub fn reports_expiry_writeoff(
+        &self,
+        from_date: &str,
+        to_date: &str,
+    ) -> Result<serde_json::Value, AppError> {
+        let from = from_date.trim();
+        let to = to_date.trim();
+
+        if from.is_empty() || to.is_empty() {
+            return Err(AppError::Validation(
+                "From date and to date are required.".to_string(),
+            ));
+        }
+
+        let conn = self.connection()?;
+
+        let (expired_lines, near_expiry_lines, expired_stock_value, near_expiry_stock_value):
+            (i64, i64, f64, f64) = conn
+            .query_row(
+                "SELECT
+                    COALESCE(SUM(CASE WHEN date(b.expiry_date) < date('now') THEN 1 ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN date(b.expiry_date) >= date('now') AND date(b.expiry_date) <= date('now', '+90 day') THEN 1 ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN date(b.expiry_date) < date('now')
+                        THEN (b.quantity_in - b.quantity_sold - b.quantity_adjusted) * b.purchase_price ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN date(b.expiry_date) >= date('now') AND date(b.expiry_date) <= date('now', '+90 day')
+                        THEN (b.quantity_in - b.quantity_sold - b.quantity_adjusted) * b.purchase_price ELSE 0 END), 0)
+                 FROM batches b
+                 WHERE b.is_active = 1
+                   AND (b.quantity_in - b.quantity_sold - b.quantity_adjusted) > 0",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let writeoff_value: f64 = conn
+            .query_row(
+                "SELECT COALESCE(SUM(sa.quantity * COALESCE(b.purchase_price, 0)), 0)
+                 FROM stock_adjustments sa
+                 JOIN batches b ON b.id = sa.batch_id
+                 WHERE sa.adjustment_type IN ('expired', 'damage', 'theft')
+                   AND date(sa.created_at) BETWEEN date(?1) AND date(?2)",
+                params![from, to],
+                |row| row.get(0),
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let mut stmt = conn
+            .prepare(
+                "SELECT
+                    m.name,
+                    b.batch_number,
+                    b.expiry_date,
+                    (b.quantity_in - b.quantity_sold - b.quantity_adjusted) AS quantity_on_hand,
+                    (b.quantity_in - b.quantity_sold - b.quantity_adjusted) * b.purchase_price AS purchase_value,
+                    CAST(julianday(b.expiry_date) - julianday('now') AS INTEGER) AS days_to_expiry
+                 FROM batches b
+                 JOIN medicines m ON m.id = b.medicine_id
+                 WHERE b.is_active = 1
+                   AND (b.quantity_in - b.quantity_sold - b.quantity_adjusted) > 0
+                   AND date(b.expiry_date) BETWEEN date(?1) AND date(?2)
+                 ORDER BY date(b.expiry_date) ASC, m.name ASC",
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let rows = stmt
+            .query_map(params![from, to], |row| {
+                let days: i64 = row.get(5)?;
+                let status = if days < 0 {
+                    "expired"
+                } else if days <= 90 {
+                    "near_expiry"
+                } else {
+                    "ok"
+                };
+
+                Ok(serde_json::json!({
+                    "medicine_name": row.get::<_, String>(0)?,
+                    "batch_number": row.get::<_, String>(1)?,
+                    "expiry_date": row.get::<_, String>(2)?,
+                    "quantity_on_hand": row.get::<_, i64>(3)?,
+                    "purchase_value": row.get::<_, f64>(4)?,
+                    "days_to_expiry": days,
+                    "status": status,
+                }))
+            })
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let mut items = Vec::new();
+        for row in rows {
+            items.push(row.map_err(|e| AppError::Internal(e.to_string()))?);
+        }
+
+        Ok(serde_json::json!({
+            "summary": {
+                "from_date": from,
+                "to_date": to,
+                "expired_lines": expired_lines,
+                "near_expiry_lines": near_expiry_lines,
+                "expired_stock_value": expired_stock_value,
+                "near_expiry_stock_value": near_expiry_stock_value,
+                "writeoff_value": writeoff_value,
+            },
+            "items": items,
+        }))
+    }
+
+    pub fn reports_customer_outstanding(&self) -> Result<serde_json::Value, AppError> {
+        let conn = self.connection()?;
+
+        let (total_customers, total_outstanding, over_30_days, over_90_days): (i64, f64, f64, f64) =
+            conn.query_row(
+                "SELECT
+                    COUNT(1),
+                    COALESCE(SUM(c.outstanding_balance), 0),
+                    COALESCE(SUM(CASE WHEN CAST(julianday('now') - julianday(lb.last_bill_date) AS INTEGER) > 30 THEN c.outstanding_balance ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN CAST(julianday('now') - julianday(lb.last_bill_date) AS INTEGER) > 90 THEN c.outstanding_balance ELSE 0 END), 0)
+                 FROM customers c
+                 LEFT JOIN (
+                    SELECT b.customer_id, MAX(date(b.bill_date)) AS last_bill_date
+                    FROM bills b
+                    WHERE b.customer_id IS NOT NULL
+                    GROUP BY b.customer_id
+                 ) lb ON lb.customer_id = c.id
+                 WHERE c.is_active = 1
+                   AND c.outstanding_balance > 0",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let mut stmt = conn
+            .prepare(
+                "SELECT
+                    c.id,
+                    c.name,
+                    COALESCE(c.phone, ''),
+                    c.outstanding_balance,
+                    COALESCE(lb.last_bill_date, ''),
+                    COALESCE(CAST(julianday('now') - julianday(lb.last_bill_date) AS INTEGER), 0) AS days_since_last_bill
+                 FROM customers c
+                 LEFT JOIN (
+                    SELECT b.customer_id, MAX(date(b.bill_date)) AS last_bill_date
+                    FROM bills b
+                    WHERE b.customer_id IS NOT NULL
+                    GROUP BY b.customer_id
+                 ) lb ON lb.customer_id = c.id
+                 WHERE c.is_active = 1
+                   AND c.outstanding_balance > 0
+                 ORDER BY c.outstanding_balance DESC, c.name ASC",
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let mapped = stmt
+            .query_map([], |row| {
+                let days: i64 = row.get(5)?;
+                let age_bucket = if days > 90 {
+                    "90+"
+                } else if days > 30 {
+                    "31-90"
+                } else {
+                    "0-30"
+                };
+
+                Ok(serde_json::json!({
+                    "customer_id": row.get::<_, i64>(0)?,
+                    "customer_name": row.get::<_, String>(1)?,
+                    "phone": row.get::<_, String>(2)?,
+                    "outstanding_balance": row.get::<_, f64>(3)?,
+                    "last_bill_date": row.get::<_, String>(4)?,
+                    "days_since_last_bill": days,
+                    "age_bucket": age_bucket,
+                }))
+            })
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let mut rows = Vec::new();
+        for row in mapped {
+            rows.push(row.map_err(|e| AppError::Internal(e.to_string()))?);
+        }
+
+        Ok(serde_json::json!({
+            "summary": {
+                "total_customers": total_customers,
+                "total_outstanding": total_outstanding,
+                "over_30_days": over_30_days,
+                "over_90_days": over_90_days,
+            },
+            "rows": rows,
+        }))
+    }
+
+    pub fn reports_supplier_outstanding(&self) -> Result<serde_json::Value, AppError> {
+        let conn = self.connection()?;
+
+        let (total_suppliers, total_outstanding, over_30_days, over_90_days): (i64, f64, f64, f64) =
+            conn.query_row(
+                "SELECT
+                    COUNT(1),
+                    COALESCE(SUM(s.outstanding_balance), 0),
+                    COALESCE(SUM(CASE WHEN CAST(julianday('now') - julianday(lb.last_bill_date) AS INTEGER) > 30 THEN s.outstanding_balance ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN CAST(julianday('now') - julianday(lb.last_bill_date) AS INTEGER) > 90 THEN s.outstanding_balance ELSE 0 END), 0)
+                 FROM suppliers s
+                 LEFT JOIN (
+                    SELECT pb.supplier_id, MAX(date(pb.bill_date)) AS last_bill_date
+                    FROM purchase_bills pb
+                    GROUP BY pb.supplier_id
+                 ) lb ON lb.supplier_id = s.id
+                 WHERE s.is_active = 1
+                   AND s.outstanding_balance > 0",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let mut stmt = conn
+            .prepare(
+                "SELECT
+                    s.id,
+                    s.name,
+                    COALESCE(s.phone, ''),
+                    s.outstanding_balance,
+                    COALESCE(lb.last_bill_date, ''),
+                    COALESCE(CAST(julianday('now') - julianday(lb.last_bill_date) AS INTEGER), 0) AS days_since_last_bill
+                 FROM suppliers s
+                 LEFT JOIN (
+                    SELECT pb.supplier_id, MAX(date(pb.bill_date)) AS last_bill_date
+                    FROM purchase_bills pb
+                    GROUP BY pb.supplier_id
+                 ) lb ON lb.supplier_id = s.id
+                 WHERE s.is_active = 1
+                   AND s.outstanding_balance > 0
+                 ORDER BY s.outstanding_balance DESC, s.name ASC",
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let mapped = stmt
+            .query_map([], |row| {
+                let days: i64 = row.get(5)?;
+                let age_bucket = if days > 90 {
+                    "90+"
+                } else if days > 30 {
+                    "31-90"
+                } else {
+                    "0-30"
+                };
+
+                Ok(serde_json::json!({
+                    "supplier_id": row.get::<_, i64>(0)?,
+                    "supplier_name": row.get::<_, String>(1)?,
+                    "phone": row.get::<_, String>(2)?,
+                    "outstanding_balance": row.get::<_, f64>(3)?,
+                    "last_bill_date": row.get::<_, String>(4)?,
+                    "days_since_last_bill": days,
+                    "age_bucket": age_bucket,
+                }))
+            })
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let mut rows = Vec::new();
+        for row in mapped {
+            rows.push(row.map_err(|e| AppError::Internal(e.to_string()))?);
+        }
+
+        Ok(serde_json::json!({
+            "summary": {
+                "total_suppliers": total_suppliers,
+                "total_outstanding": total_outstanding,
+                "over_30_days": over_30_days,
+                "over_90_days": over_90_days,
+            },
+            "rows": rows,
+        }))
+    }
+
+    pub fn reports_audit_log(
+        &self,
+        from_date: &str,
+        to_date: &str,
+        user_id: Option<i64>,
+        module: Option<&str>,
+        action: Option<&str>,
+    ) -> Result<serde_json::Value, AppError> {
+        let from = from_date.trim();
+        let to = to_date.trim();
+
+        if from.is_empty() || to.is_empty() {
+            return Err(AppError::Validation(
+                "From date and to date are required.".to_string(),
+            ));
+        }
+
+        let module_filter = module
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        let action_filter = action
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+
+        let conn = self.connection()?;
+
+        let (total_events, unique_users, unique_modules): (i64, i64, i64) = conn
+            .query_row(
+                "SELECT
+                    COUNT(1),
+                    COUNT(DISTINCT COALESCE(user_name, '')),
+                    COUNT(DISTINCT COALESCE(module, ''))
+                 FROM audit_log
+                 WHERE date(created_at) BETWEEN date(?1) AND date(?2)
+                   AND (?3 IS NULL OR user_id = ?3)
+                   AND (?4 IS NULL OR lower(module) = lower(?4))
+                   AND (?5 IS NULL OR lower(action) = lower(?5))",
+                params![from, to, user_id, module_filter, action_filter],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let mut stmt = conn
+            .prepare(
+                "SELECT
+                    id,
+                    created_at,
+                    COALESCE(user_name, 'Unknown'),
+                    COALESCE(action, ''),
+                    COALESCE(module, ''),
+                    COALESCE(record_id, ''),
+                    COALESCE(old_value, ''),
+                    COALESCE(new_value, ''),
+                    COALESCE(notes, '')
+                 FROM audit_log
+                 WHERE date(created_at) BETWEEN date(?1) AND date(?2)
+                   AND (?3 IS NULL OR user_id = ?3)
+                   AND (?4 IS NULL OR lower(module) = lower(?4))
+                   AND (?5 IS NULL OR lower(action) = lower(?5))
+                 ORDER BY datetime(created_at) DESC
+                 LIMIT 1000",
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let mapped = stmt
+            .query_map(
+                params![from, to, user_id, module_filter, action_filter],
+                |row| {
+                    Ok(serde_json::json!({
+                        "id": row.get::<_, i64>(0)?,
+                        "created_at": row.get::<_, String>(1)?,
+                        "user_name": row.get::<_, String>(2)?,
+                        "action": row.get::<_, String>(3)?,
+                        "module": row.get::<_, String>(4)?,
+                        "record_id": row.get::<_, String>(5)?,
+                        "old_value": row.get::<_, String>(6)?,
+                        "new_value": row.get::<_, String>(7)?,
+                        "notes": row.get::<_, String>(8)?,
+                    }))
+                },
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let mut rows = Vec::new();
+        for row in mapped {
+            rows.push(row.map_err(|e| AppError::Internal(e.to_string()))?);
+        }
+
+        Ok(serde_json::json!({
+            "summary": {
+                "from_date": from,
+                "to_date": to,
+                "total_events": total_events,
+                "unique_users": unique_users,
+                "unique_modules": unique_modules,
+            },
+            "rows": rows,
+        }))
+    }
+
+    pub fn reports_ca_package(&self, financial_year: &str) -> Result<String, AppError> {
+        let (from_date, to_date, year_label) = Self::parse_financial_year(financial_year)?;
+
+        let sales = self.reports_sales(&from_date, &to_date)?;
+        let purchase = self.reports_purchase(&from_date, &to_date, None)?;
+        let stock = self.reports_stock()?;
+        let gst = self.reports_gst(&from_date, &to_date)?;
+        let profit_loss = self.reports_profit_loss(&from_date, &to_date)?;
+        let expiry_writeoff = self.reports_expiry_writeoff(&from_date, &to_date)?;
+        let customer_outstanding = self.reports_customer_outstanding()?;
+        let supplier_outstanding = self.reports_supplier_outstanding()?;
+        let audit = self.reports_audit_log(&from_date, &to_date, None, None, None)?;
+
+        let package_dir = std::env::temp_dir().join("pharmacare-pro").join("reports");
+        fs::create_dir_all(&package_dir).map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let timestamp = chrono::Utc::now().format("%Y%m%d%H%M%S").to_string();
+        let zip_path = package_dir.join(format!("ca_package_{}_{}.zip", year_label, timestamp));
+        let zip_file = File::create(&zip_path).map_err(|e| AppError::Internal(e.to_string()))?;
+        let mut zip = zip::ZipWriter::new(zip_file);
+        let options = FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+
+        let readme = format!(
+            "PharmaCare Pro CA Package\nFinancial Year: {}\nDate Range: {} to {}\nGenerated At (UTC): {}\n\nFiles include JSON report exports for sales, purchase, stock, GST, profit-loss and audit logs.\n",
+            year_label,
+            from_date,
+            to_date,
+            chrono::Utc::now().to_rfc3339()
+        );
+
+        zip.start_file("README.txt", options)
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+        zip.write_all(readme.as_bytes())
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let manifest = serde_json::json!({
+            "financial_year": year_label,
+            "from_date": from_date,
+            "to_date": to_date,
+            "generated_at": chrono::Utc::now().to_rfc3339(),
+            "reports": [
+                "sales.json",
+                "purchase.json",
+                "stock.json",
+                "gst.json",
+                "profit_loss.json",
+                "expiry_writeoff.json",
+                "customer_outstanding.json",
+                "supplier_outstanding.json",
+                "audit_log.json"
+            ]
+        });
+
+        zip.start_file("manifest.json", options)
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+        zip.write_all(
+            serde_json::to_string_pretty(&manifest)
+                .map_err(|e| AppError::Internal(e.to_string()))?
+                .as_bytes(),
+        )
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        Self::zip_json_file(&mut zip, "sales.json", &sales, options)?;
+        Self::zip_json_file(&mut zip, "purchase.json", &purchase, options)?;
+        Self::zip_json_file(&mut zip, "stock.json", &stock, options)?;
+        Self::zip_json_file(&mut zip, "gst.json", &gst, options)?;
+        Self::zip_json_file(&mut zip, "profit_loss.json", &profit_loss, options)?;
+        Self::zip_json_file(&mut zip, "expiry_writeoff.json", &expiry_writeoff, options)?;
+        Self::zip_json_file(
+            &mut zip,
+            "customer_outstanding.json",
+            &customer_outstanding,
+            options,
+        )?;
+        Self::zip_json_file(
+            &mut zip,
+            "supplier_outstanding.json",
+            &supplier_outstanding,
+            options,
+        )?;
+        Self::zip_json_file(&mut zip, "audit_log.json", &audit, options)?;
+
+        zip.finish().map_err(|e| AppError::Internal(e.to_string()))?;
+
+        Ok(zip_path.to_string_lossy().to_string())
+    }
+
+    fn zip_json_file(
+        zip: &mut zip::ZipWriter<File>,
+        file_name: &str,
+        value: &serde_json::Value,
+        options: FileOptions,
+    ) -> Result<(), AppError> {
+        zip.start_file(file_name, options)
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+        let bytes = serde_json::to_vec_pretty(value).map_err(|e| AppError::Internal(e.to_string()))?;
+        zip.write_all(&bytes)
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+        Ok(())
+    }
+
+    fn parse_financial_year(financial_year: &str) -> Result<(String, String, String), AppError> {
+        let trimmed = financial_year.trim();
+        if trimmed.is_empty() {
+            return Err(AppError::Validation("Financial year is required.".to_string()));
+        }
+
+        let normalized = trimmed.replace('/', "-");
+        let parts: Vec<&str> = normalized.split('-').collect();
+
+        let start_year = if parts.len() == 1 {
+            parts[0].parse::<i32>().map_err(|_| {
+                AppError::Validation("Financial year must be like 2025-26.".to_string())
+            })?
+        } else if parts.len() == 2 {
+            parts[0].parse::<i32>().map_err(|_| {
+                AppError::Validation("Financial year must be like 2025-26.".to_string())
+            })?
+        } else {
+            return Err(AppError::Validation(
+                "Financial year must be like 2025-26.".to_string(),
+            ));
+        };
+
+        let end_year = start_year + 1;
+        let label = format!("{}-{}", start_year, end_year);
+        Ok((
+            format!("{}-04-01", start_year),
+            format!("{}-03-31", end_year),
+            label,
+        ))
     }
 
     pub fn customer_search(&self, query: &str) -> Result<serde_json::Value, AppError> {
@@ -2258,6 +4084,134 @@ impl Database {
         Ok(serde_json::Value::Object(map))
     }
 
+    pub fn create_print_job(
+        &self,
+        job_type: &str,
+        printer_type: Option<&str>,
+        printer_name: Option<&str>,
+        file_name: &str,
+        file_path: &str,
+        size_bytes: i64,
+    ) -> Result<i64, AppError> {
+        let conn = self.connection()?;
+        conn.execute(
+            "INSERT INTO print_jobs (
+                job_type, printer_type, printer_name, file_name, file_path,
+                size_bytes, status, retry_count, last_error, created_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'queued', 0, NULL, ?7, ?7)",
+            params![
+                job_type,
+                printer_type,
+                printer_name,
+                file_name,
+                file_path,
+                size_bytes,
+                chrono::Utc::now().to_rfc3339(),
+            ],
+        )
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        Ok(conn.last_insert_rowid())
+    }
+
+    pub fn update_print_job_status(
+        &self,
+        file_name: &str,
+        status: &str,
+        last_error: Option<&str>,
+        increment_retry: bool,
+    ) -> Result<(), AppError> {
+        let conn = self.connection()?;
+        let retry_sql = if increment_retry {
+            "retry_count = retry_count + 1,"
+        } else {
+            ""
+        };
+        let sql = format!(
+            "UPDATE print_jobs
+             SET status = ?1,
+                 {} 
+                 last_error = ?2,
+                 updated_at = ?3
+             WHERE file_name = ?4",
+            retry_sql
+        );
+        conn.execute(
+            &sql,
+            params![status, last_error, chrono::Utc::now().to_rfc3339(), file_name],
+        )
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+        Ok(())
+    }
+
+    pub fn list_print_jobs(&self, limit: i64) -> Result<serde_json::Value, AppError> {
+        let conn = self.connection()?;
+        let safe_limit = limit.clamp(1, 200);
+        let mut stmt = conn
+            .prepare(
+                "SELECT
+                    file_name,
+                    size_bytes,
+                    CAST(strftime('%s', updated_at) AS INTEGER) AS modified_at,
+                    COALESCE(printer_name, '') AS printer_name,
+                    COALESCE(printer_type, '') AS printer_type,
+                    status,
+                    retry_count,
+                    COALESCE(last_error, '') AS last_error,
+                    file_path,
+                    job_type
+                 FROM print_jobs
+                 ORDER BY datetime(updated_at) DESC, id DESC
+                 LIMIT ?1",
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let rows = stmt
+            .query_map(params![safe_limit], |row| {
+                let file_name: String = row.get(0)?;
+                let extension = std::path::Path::new(&file_name)
+                    .extension()
+                    .and_then(|v| v.to_str())
+                    .unwrap_or("")
+                    .to_string();
+                Ok(serde_json::json!({
+                    "file_name": file_name,
+                    "size_bytes": row.get::<_, i64>(1)?,
+                    "modified_at": row.get::<_, i64>(2)?,
+                    "printer_name": row.get::<_, String>(3)?,
+                    "printer_type": row.get::<_, String>(4)?,
+                    "status": row.get::<_, String>(5)?,
+                    "retry_count": row.get::<_, i64>(6)?,
+                    "last_error": row.get::<_, String>(7)?,
+                    "file_path": row.get::<_, String>(8)?,
+                    "job_type": row.get::<_, String>(9)?,
+                    "extension": extension,
+                }))
+            })
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let mut items = Vec::new();
+        for row in rows {
+            items.push(row.map_err(|e| AppError::Internal(e.to_string()))?);
+        }
+
+        Ok(serde_json::json!({
+            "items": items,
+            "total": items.len(),
+        }))
+    }
+
+    pub fn get_print_job_path_by_name(&self, file_name: &str) -> Result<Option<String>, AppError> {
+        let conn = self.connection()?;
+        conn.query_row(
+            "SELECT file_path FROM print_jobs WHERE file_name = ?1",
+            params![file_name],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| AppError::Internal(e.to_string()))
+    }
+
     pub fn list_medicine_categories(&self) -> Result<Vec<CategoryDto>, AppError> {
         let conn = self.connection()?;
         let mut stmt = conn
@@ -3104,6 +5058,26 @@ impl Database {
             conn.execute(
                 "INSERT INTO schema_migrations (version, applied_at) VALUES (?1, ?2)",
                 params!["001_initial", chrono::Utc::now().to_rfc3339()],
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+        }
+
+        let print_jobs_applied: Option<String> = conn
+            .query_row(
+                "SELECT version FROM schema_migrations WHERE version = '002_print_jobs'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        if print_jobs_applied.is_none() {
+            conn.execute_batch(PRINT_JOBS_MIGRATION_SQL)
+                .map_err(|e| AppError::Internal(e.to_string()))?;
+
+            conn.execute(
+                "INSERT INTO schema_migrations (version, applied_at) VALUES (?1, ?2)",
+                params!["002_print_jobs", chrono::Utc::now().to_rfc3339()],
             )
             .map_err(|e| AppError::Internal(e.to_string()))?;
         }

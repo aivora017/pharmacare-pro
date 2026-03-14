@@ -1,3 +1,4 @@
+use crate::commands::permission::require_permission;
 use crate::{error::AppError, AppState};
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -130,6 +131,7 @@ pub async fn medicine_create(
     input: MedicineCreateInput,
 ) -> Result<i64, AppError> {
     let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+    require_permission(&db, input.created_by, "medicine")?;
 
     if input.name.trim().is_empty() || input.generic_name.trim().is_empty() {
         return Err(AppError::Validation(
@@ -204,6 +206,7 @@ pub async fn medicine_update(
     input: MedicineUpdateInput,
 ) -> Result<(), AppError> {
     let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+    require_permission(&db, input.updated_by, "medicine")?;
 
     if input.name.trim().is_empty() || input.generic_name.trim().is_empty() {
         return Err(AppError::Validation(
@@ -289,6 +292,7 @@ pub async fn medicine_create_batch(
     input: MedicineBatchCreateInput,
 ) -> Result<i64, AppError> {
     let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+    require_permission(&db, input.created_by, "medicine")?;
 
     if input.batch_number.trim().is_empty() || input.expiry_date.trim().is_empty() {
         return Err(AppError::Validation(
@@ -357,6 +361,7 @@ pub async fn medicine_delete(
     user_id: i64,
 ) -> Result<(), AppError> {
     let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+    require_permission(&db, user_id, "medicine")?;
     db.delete_medicine(id)?;
     db.write_audit_log(
         "MEDICINE_DELETED",
@@ -388,6 +393,7 @@ pub async fn medicine_update_batch(
     input: MedicineBatchUpdateInput,
 ) -> Result<(), AppError> {
     let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+    require_permission(&db, input.updated_by, "medicine")?;
 
     if input.expiry_date.trim().is_empty() {
         return Err(AppError::Validation("Expiry date is required.".to_string()));

@@ -1,6 +1,7 @@
 #![allow(unused_variables, dead_code)]
 //! Inventory queries and stock adjustments
 
+use crate::commands::permission::require_permission;
 use crate::{error::AppError, AppState};
 use tauri::State;
 
@@ -37,5 +38,6 @@ pub async fn inventory_adjust_stock(
     user_id: i64,
 ) -> Result<(), AppError> {
     let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+    require_permission(&db, user_id, "medicine")?;
     db.inventory_adjust_stock(batch_id, quantity, &adjustment_type, &reason, user_id)
 }

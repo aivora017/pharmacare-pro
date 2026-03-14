@@ -1,6 +1,7 @@
 #![allow(unused_variables, dead_code)]
 //! Backup and Restore
 
+use crate::commands::permission::require_permission;
 use crate::{error::AppError, AppState};
 use tauri::State;
 
@@ -8,10 +9,11 @@ use tauri::State;
 pub async fn backup_create(
     state: State<'_, AppState>,
     destination: Option<String>,
+    user_id: i64,
 ) -> Result<String, AppError> {
-    Err(AppError::Validation(
-        "Backup creation is not implemented yet.".to_string(),
-    ))
+    let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+    require_permission(&db, user_id, "settings")?;
+    db.backup_create(destination.as_deref())
 }
 #[tauri::command]
 pub async fn backup_restore(
@@ -19,13 +21,16 @@ pub async fn backup_restore(
     backup_path: String,
     user_id: i64,
 ) -> Result<(), AppError> {
-    Err(AppError::Validation(
-        "Backup restore is not implemented yet.".to_string(),
-    ))
+    let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+    require_permission(&db, user_id, "settings")?;
+    db.backup_restore(&backup_path, user_id)
 }
 #[tauri::command]
-pub async fn backup_list(state: State<'_, AppState>) -> Result<Vec<serde_json::Value>, AppError> {
-    Err(AppError::Validation(
-        "Backup list is not implemented yet.".to_string(),
-    ))
+pub async fn backup_list(
+    state: State<'_, AppState>,
+    user_id: i64,
+) -> Result<Vec<serde_json::Value>, AppError> {
+    let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+    require_permission(&db, user_id, "settings")?;
+    db.backup_list()
 }

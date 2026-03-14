@@ -8,6 +8,13 @@ export interface IPrintJobItem {
   size_bytes: number
   modified_at?: number
   extension: string
+  printer_name?: string
+  printer_type?: string
+  status?: 'queued' | 'sent' | 'failed' | string
+  retry_count?: number
+  last_error?: string
+  file_path?: string
+  job_type?: string
 }
 
 export interface IPrintJobListResponse {
@@ -16,15 +23,20 @@ export interface IPrintJobListResponse {
 }
 
 export const printerService = {
-  listPrinters: async (): Promise<string[]> => invoke<string[]>('printer_list_printers'),
-  printBill: async (billId: number, printerType: 'thermal' | 'normal'): Promise<void> =>
-    invoke('printer_print_bill', { billId, printerType }),
-  printLabels: async (labelData: unknown, printerName: string): Promise<void> =>
-    invoke('printer_print_labels', { labelData, printerName }),
-  testPrint: async (printerName: string, printerType: string): Promise<void> =>
-    invoke('printer_test_print', { printerName, printerType }),
-  listJobs: async (): Promise<IPrintJobListResponse> =>
-    invoke<IPrintJobListResponse>('printer_list_jobs'),
-  requeueJob: async (fileName: string, printerName: string): Promise<void> =>
-    invoke('printer_requeue_job', { fileName, printerName }),
+  listPrinters: async (actorUserId: number): Promise<string[]> =>
+    invoke<string[]>('printer_list_printers', { actorUserId }),
+  printBill: async (
+    billId: number,
+    printerType: 'thermal' | 'normal',
+    actorUserId: number,
+    printerName?: string
+  ): Promise<void> => invoke('printer_print_bill', { billId, printerType, printerName, actorUserId }),
+  printLabels: async (labelData: unknown, printerName: string, actorUserId: number): Promise<void> =>
+    invoke('printer_print_labels', { labelData, printerName, actorUserId }),
+  testPrint: async (printerName: string, printerType: string, actorUserId: number): Promise<void> =>
+    invoke('printer_test_print', { printerName, printerType, actorUserId }),
+  listJobs: async (actorUserId: number): Promise<IPrintJobListResponse> =>
+    invoke<IPrintJobListResponse>('printer_list_jobs', { actorUserId }),
+  requeueJob: async (fileName: string, printerName: string, actorUserId: number): Promise<void> =>
+    invoke('printer_requeue_job', { fileName, printerName, actorUserId }),
 }

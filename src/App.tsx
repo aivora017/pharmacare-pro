@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { Suspense, lazy, useEffect } from 'react'
 import { BrowserRouter, Navigate, Route, Routes, useNavigate } from 'react-router-dom'
 import { Toaster } from 'react-hot-toast'
 import { Sidebar } from '@/components/layout/Sidebar'
@@ -7,15 +7,17 @@ import { useAuthStore } from '@/store/authStore'
 import AuthPage from '@/pages/Auth'
 import DashboardPage from '@/pages/Dashboard'
 import BillingPage from '@/pages/Billing'
-import MedicinePage from '@/pages/Medicine'
-import PurchasePage from '@/pages/Purchase'
-import CustomersPage from '@/pages/Customers'
-import DoctorsPage from '@/pages/Doctors'
-import SuppliersPage from '@/pages/Suppliers'
-import SettingsPage from '@/pages/Settings'
-import ExpiryPage from '@/pages/Expiry'
-import BarcodesPage from '@/pages/Barcodes'
-import { ModulePlaceholderPage } from '@/pages/ModulePlaceholder'
+
+const MedicinePage = lazy(() => import('@/pages/Medicine'))
+const PurchasePage = lazy(() => import('@/pages/Purchase'))
+const CustomersPage = lazy(() => import('@/pages/Customers'))
+const DoctorsPage = lazy(() => import('@/pages/Doctors'))
+const SuppliersPage = lazy(() => import('@/pages/Suppliers'))
+const SettingsPage = lazy(() => import('@/pages/Settings'))
+const ExpiryPage = lazy(() => import('@/pages/Expiry'))
+const BarcodesPage = lazy(() => import('@/pages/Barcodes'))
+const ReportsPage = lazy(() => import('@/pages/Reports'))
+const AIPage = lazy(() => import('@/pages/AI'))
 
 void useNavigate
 
@@ -45,28 +47,29 @@ function ProtectedLayout() {
         <Sidebar />
         <main className="flex-1 overflow-auto">
           <Header />
-          <Routes>
-            <Route path="/dashboard" element={<DashboardPage />} />
-            <Route path="/billing" element={<BillingPage />} />
-            <Route path="/medicine" element={<MedicinePage />} />
-            <Route path="/purchase" element={<PurchasePage />} />
-            <Route path="/customers" element={<CustomersPage />} />
-            <Route path="/doctors" element={<DoctorsPage />} />
-            <Route path="/suppliers" element={<SuppliersPage />} />
-            <Route path="/expiry" element={<ExpiryPage />} />
-            <Route path="/barcodes" element={<BarcodesPage />} />
-            <Route
-              path="/reports"
-              element={
-                <ModulePlaceholderPage
-                  title="Reports"
-                  description="Sales, GST, and stock reports will appear here once report APIs are ready."
-                />
-              }
-            />
-            <Route path="/settings" element={<SettingsPage />} />
-            <Route path="*" element={<Navigate to="/dashboard" replace />} />
-          </Routes>
+          <Suspense
+            fallback={
+              <div className="flex items-center justify-center py-20 text-sm text-slate-500">
+                Loading module...
+              </div>
+            }
+          >
+            <Routes>
+              <Route path="/dashboard" element={<DashboardPage />} />
+              <Route path="/billing" element={<BillingPage />} />
+              <Route path="/medicine" element={<MedicinePage />} />
+              <Route path="/purchase" element={<PurchasePage />} />
+              <Route path="/customers" element={<CustomersPage />} />
+              <Route path="/doctors" element={<DoctorsPage />} />
+              <Route path="/suppliers" element={<SuppliersPage />} />
+              <Route path="/expiry" element={<ExpiryPage />} />
+              <Route path="/barcodes" element={<BarcodesPage />} />
+              <Route path="/reports" element={<ReportsPage />} />
+              <Route path="/ai" element={<AIPage />} />
+              <Route path="/settings" element={<SettingsPage />} />
+              <Route path="*" element={<Navigate to="/dashboard" replace />} />
+            </Routes>
+          </Suspense>
         </main>
       </div>
     </div>

@@ -18,6 +18,7 @@
 //! 10. INSERT INTO audit_log
 //! 11. COMMIT; return new bill_id
 
+use crate::commands::permission::require_permission;
 use crate::{error::AppError, AppState};
 use serde::Deserialize;
 use tauri::State;
@@ -68,6 +69,7 @@ pub async fn billing_create_bill(
     input: CreateBillInput,
 ) -> Result<i64, AppError> {
     let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+    require_permission(&db, input.created_by, "billing")?;
     db.create_bill(&input)
 }
 
@@ -79,6 +81,7 @@ pub async fn billing_cancel_bill(
     user_id: i64,
 ) -> Result<(), AppError> {
     let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+    require_permission(&db, user_id, "billing")?;
     db.cancel_bill(bill_id, &reason, user_id)
 }
 
@@ -134,10 +137,18 @@ pub async fn billing_create_return(
     reason: String,
     user_id: i64,
 ) -> Result<i64, AppError> {
-    Err(AppError::Validation(
-        "Sales return workflow is not implemented yet. Please use purchase return for now."
-            .to_string(),
-    ))
+    let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+    require_permission(&db, user_id, "billing")?;
+    db.create_bill_return(original_bill_id, &items, &reason, user_id)
+}
+
+#[tauri::command]
+pub async fn billing_list_returns(
+    state: State<'_, AppState>,
+    limit: Option<i64>,
+) -> Result<serde_json::Value, AppError> {
+    let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+    db.list_bill_returns(limit.unwrap_or(20))
 }
 
 #[tauri::command]

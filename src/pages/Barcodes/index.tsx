@@ -29,8 +29,10 @@ import {
   type IMedicineListItem,
 } from '@/services/medicineService'
 import { printerService, type IPrintJobItem } from '@/services/printerService'
+import { useAuthStore } from '@/store/authStore'
 
 export default function BarcodesPage() {
+  const user = useAuthStore((state) => state.user)
   const [activeTab, setActiveTab] = useState<'generate' | 'print' | 'printers'>('generate')
   const [query, setQuery] = useState('')
   const [searching, setSearching] = useState(false)
@@ -100,9 +102,13 @@ export default function BarcodesPage() {
   }
 
   const generateOne = async (batchId: number) => {
+    if (!user) {
+      toast.error('Session expired. Please login again.')
+      return
+    }
     setGenerating(true)
     try {
-      const code = await barcodeService.generateForBatch(batchId)
+      const code = await barcodeService.generateForBatch(batchId, user.id)
       setLastBarcode(code)
       toast.success('Barcode generated.')
       if (selectedMedicine) await loadBatches(selectedMedicine)
@@ -115,13 +121,17 @@ export default function BarcodesPage() {
   }
 
   const generateSelected = async () => {
+    if (!user) {
+      toast.error('Session expired. Please login again.')
+      return
+    }
     if (selectedBatchIds.length === 0) {
       toast.error('Select at least one batch.')
       return
     }
     setGenerating(true)
     try {
-      const result = await barcodeService.generateBulk(selectedBatchIds)
+      const result = await barcodeService.generateBulk(selectedBatchIds, user.id)
       toast.success(`Generated ${result.total} barcode(s).`)
       if (selectedMedicine) await loadBatches(selectedMedicine)
     } catch (error) {
@@ -133,9 +143,13 @@ export default function BarcodesPage() {
   }
 
   const generateAllMissing = async () => {
+    if (!user) {
+      toast.error('Session expired. Please login again.')
+      return
+    }
     setGenerating(true)
     try {
-      const result = await barcodeService.generateBulk([])
+      const result = await barcodeService.generateBulk([], user.id)
       toast.success(`Generated ${result.total} missing barcode(s).`)
       if (selectedMedicine) await loadBatches(selectedMedicine)
     } catch (error) {
@@ -147,8 +161,12 @@ export default function BarcodesPage() {
   }
 
   const loadPrinters = useCallback(async () => {
+    if (!user) {
+      setPrinters([])
+      return
+    }
     try {
-      const rows = await printerService.listPrinters()
+      const rows = await printerService.listPrinters(user.id)
       setPrinters(rows)
       if (rows.length > 0 && !rows.includes(selectedPrinter)) {
         setSelectedPrinter(rows[0])
@@ -156,21 +174,29 @@ export default function BarcodesPage() {
     } catch {
       toast.error('Could not load printers.')
     }
-  }, [selectedPrinter])
+  }, [selectedPrinter, user])
 
   const loadPrintJobs = useCallback(async () => {
+    if (!user) {
+      setPrintJobs([])
+      return
+    }
     setLoadingJobs(true)
     try {
-      const payload = await printerService.listJobs()
+      const payload = await printerService.listJobs(user.id)
       setPrintJobs(payload.items)
     } catch {
       toast.error('Could not load print queue.')
     } finally {
       setLoadingJobs(false)
     }
-  }, [])
+  }, [user])
 
   const printSelectedLabels = async () => {
+    if (!user) {
+      toast.error('Session expired. Please login again.')
+      return
+    }
     if (!selectedMedicine) {
       toast.error('Select a medicine in Generate tab first.')
       return
@@ -208,7 +234,7 @@ export default function BarcodesPage() {
 
     setPrinting(true)
     try {
-      await barcodeService.printLabels(labels, selectedPrinter)
+      await barcodeService.printLabels(labels, selectedPrinter, user.id)
       toast.success(`Queued ${labels.length} label(s) for print.`)
       await loadPrintJobs()
     } catch (error) {
@@ -220,8 +246,12 @@ export default function BarcodesPage() {
   }
 
   const requeueJob = async (fileName: string) => {
+    if (!user) {
+      toast.error('Session expired. Please login again.')
+      return
+    }
     try {
-      await printerService.requeueJob(fileName, selectedPrinter)
+      await printerService.requeueJob(fileName, selectedPrinter, user.id)
       toast.success('Print job requeued.')
       await loadPrintJobs()
     } catch (error) {
@@ -231,9 +261,13 @@ export default function BarcodesPage() {
   }
 
   const testPrint = async (printerName: string) => {
+    if (!user) {
+      toast.error('Session expired. Please login again.')
+      return
+    }
     setTestingPrinter(printerName)
     try {
-      await printerService.testPrint(printerName, testPrinterType)
+      await printerService.testPrint(printerName, testPrinterType, user.id)
       toast.success(`Test print queued for ${printerName}.`)
       await loadPrintJobs()
     } catch (error) {
@@ -615,7 +649,16 @@ export default function BarcodesPage() {
                     >
                       <div>
                         <p className="text-sm text-slate-800 font-medium">{job.file_name}</p>
-                        <p className="text-xs text-slate-500">{job.size_bytes} bytes</p>
+                        <p className="text-xs text-slate-500">
+                          {job.size_bytes} bytes | {job.job_type ?? 'print'} | {job.printer_type || 'default'}
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          Status: <span className="font-medium uppercase">{job.status ?? 'queued'}</span>
+                          {' | '}Retries: {job.retry_count ?? 0}
+                        </p>
+                        {job.last_error && (
+                          <p className="text-xs text-red-600 break-all">Error: {job.last_error}</p>
+                        )}
                       </div>
                       <button
                         type="button"
@@ -624,7 +667,7 @@ export default function BarcodesPage() {
                         }}
                         className="px-3 py-2 text-xs rounded-lg border border-slate-300 hover:bg-slate-50 min-h-touch"
                       >
-                        Requeue
+                        Retry
                       </button>
                     </div>
                   ))}

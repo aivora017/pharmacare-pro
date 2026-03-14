@@ -24,6 +24,23 @@ export interface IHeldBillSummary {
   created_at: string
 }
 
+export interface ISaleReturnItemInput {
+  bill_item_id?: number
+  batch_id?: number
+  quantity: number
+}
+
+export interface ISaleReturnSummary {
+  id: number
+  return_number: string
+  original_bill_id: number
+  original_bill_number: string
+  total_amount: number
+  reason: string
+  return_date: string
+  created_at: string
+}
+
 export const billingService = {
   createBill: async (input: CreateBillInput): Promise<number> =>
     invoke<number>('billing_create_bill', { input }),
@@ -43,10 +60,12 @@ export const billingService = {
     invoke('billing_restore_held_bill', { heldBillId: id }),
   createReturn: async (
     originalBillId: number,
-    items: unknown,
+    items: ISaleReturnItemInput[],
     reason: string,
     userId: number
   ): Promise<number> =>
     invoke<number>('billing_create_return', { originalBillId, items, reason, userId }),
+  listReturns: async (limit = 20): Promise<ISaleReturnSummary[]> =>
+    invoke<ISaleReturnSummary[]>('billing_list_returns', { limit }),
   getTodaySummary: async () => invoke('billing_get_today_summary'),
 }

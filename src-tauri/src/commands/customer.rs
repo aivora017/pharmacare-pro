@@ -1,6 +1,7 @@
 #![allow(unused_variables, dead_code)]
 //! Customer and Doctor management
 
+use crate::commands::permission::require_permission;
 use crate::{error::AppError, AppState};
 use serde::Deserialize;
 use tauri::State;
@@ -48,6 +49,7 @@ pub async fn customer_create(
     user_id: i64,
 ) -> Result<i64, AppError> {
     let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+    require_permission(&db, user_id, "customers")?;
     db.customer_create(
         &data.name,
         data.phone.as_deref(),
@@ -63,6 +65,7 @@ pub async fn customer_update(
     user_id: i64,
 ) -> Result<(), AppError> {
     let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+    require_permission(&db, user_id, "customers")?;
     db.customer_update(id, &data, user_id)
 }
 #[tauri::command]
@@ -82,6 +85,7 @@ pub async fn customer_record_credit_payment(
     user_id: i64,
 ) -> Result<(), AppError> {
     let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+    require_permission(&db, user_id, "customers")?;
     db.customer_record_credit_payment(customer_id, amount, user_id)
 }
 #[tauri::command]
@@ -96,6 +100,7 @@ pub async fn doctor_create(
     user_id: i64,
 ) -> Result<i64, AppError> {
     let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+    require_permission(&db, user_id, "doctors")?;
     db.doctor_create(&data, user_id)
 }
 #[tauri::command]
@@ -106,5 +111,6 @@ pub async fn doctor_update(
     user_id: i64,
 ) -> Result<(), AppError> {
     let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+    require_permission(&db, user_id, "doctors")?;
     db.doctor_update(id, &data, user_id)
 }

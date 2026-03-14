@@ -61,6 +61,34 @@ interface AuthStore extends IAuthState {
   hasPermission: (key: keyof IPermissions) => boolean
 }
 
+function normalizeAuthError(error: unknown, fallback: string): Error {
+  const message = error instanceof Error ? error.message : String(error)
+  const lowered = message.toLowerCase()
+
+  if (lowered.includes('locked')) {
+    return new Error('Account is locked. Please contact the admin.')
+  }
+
+  if (lowered.includes('disabled') || lowered.includes('inactive')) {
+    return new Error('Account is disabled. Please contact the admin.')
+  }
+
+  if (
+    lowered.includes('invalid credentials') ||
+    lowered.includes('invalid email') ||
+    lowered.includes('invalid password') ||
+    lowered.includes('unauthorized')
+  ) {
+    return new Error('Email or password is incorrect. Please try again.')
+  }
+
+  if (lowered.includes('session') && (lowered.includes('expired') || lowered.includes('invalid'))) {
+    return new Error('Your session expired. Please sign in again.')
+  }
+
+  return new Error(fallback)
+}
+
 const ROLE_PERMISSION_FALLBACK: Record<string, IPermissions> = {
   admin: { all: true },
   pharmacist: {
@@ -97,15 +125,21 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
    * The Rust command does: fetch user → verify bcrypt → create JWT → save session → return user + token
    */
   login: async (email: string, password: string) => {
-    const result = await invoke<{ user: IUser; token: string }>('auth_login', {
-      email: email.toLowerCase().trim(),
-      password,
-    })
-    set({
-      user: result.user,
-      token: result.token,
-      isAuthenticated: true,
-    })
+    try {
+      const result = await invoke<{ user: IUser; token: string }>('auth_login', {
+        email: email.toLowerCase().trim(),
+        password,
+      })
+
+      set({
+        user: result.user,
+        token: result.token,
+        isAuthenticated: true,
+      })
+    } catch (error: unknown) {
+      set({ user: null, token: null, isAuthenticated: false })
+      throw normalizeAuthError(error, 'Unable to sign in right now. Please try again.')
+    }
   },
 
   // ── Register ─────────────────────────────────────────────────
@@ -115,13 +149,17 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
    */
   register: async (username: string, password: string) => {
     const safeUsername = username.trim().toLowerCase()
-    await invoke<number>('auth_create_user', {
-      name: safeUsername,
-      email: safeUsername,
-      password,
-      role_id: 2,
-      created_by: 1,
-    })
+    try {
+      await invoke<number>('auth_create_user', {
+        name: safeUsername,
+        email: safeUsername,
+        password,
+        role_id: 2,
+        created_by: 1,
+      })
+    } catch (error: unknown) {
+      throw normalizeAuthError(error, 'Unable to create user right now. Please try again.')
+    }
   },
 
   // ── Logout ────────────────────────────────────────────────────
@@ -153,13 +191,18 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
    * Rust checks keychain → validates JWT expiry → returns user if valid
    */
   restoreSession: async () => {
+    set({ isLoading: true })
+
     try {
       const result = await invoke<{ user: IUser; token: string } | null>('auth_restore_session')
       if (result) {
         set({ user: result.user, token: result.token, isAuthenticated: true })
+      } else {
+        set({ user: null, token: null, isAuthenticated: false })
       }
     } catch {
-      // No session found — user needs to log in
+      // Any restore failure should leave auth state fully cleared.
+      set({ user: null, token: null, isAuthenticated: false })
     } finally {
       set({ isLoading: false })
     }

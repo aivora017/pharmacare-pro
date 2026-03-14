@@ -101,7 +101,9 @@ export default function PurchasePage() {
   const [parsedRows, setParsedRows] = useState<EmailParsedRow[]>([])
   const [isImportingBill, setIsImportingBill] = useState(false)
   const [isAutoMatching, setIsAutoMatching] = useState(false)
-  const [selectedImportSupplierId, setSelectedImportSupplierId] = useState<number | undefined>(undefined)
+  const [selectedImportSupplierId, setSelectedImportSupplierId] = useState<number | undefined>(
+    undefined
+  )
   const [mapping, setMapping] = useState({
     medicine_name: '',
     batch_number: '',
@@ -296,7 +298,10 @@ export default function PurchasePage() {
     let rows: Record<string, string>[] = []
     if (lower.endsWith('.csv')) {
       const text = await file.text()
-      const result = Papa.parse<Record<string, string>>(text, { header: true, skipEmptyLines: true })
+      const result = Papa.parse<Record<string, string>>(text, {
+        header: true,
+        skipEmptyLines: true,
+      })
       if (result.errors.length > 0) {
         toast.error('Could not parse CSV file.')
         return
@@ -310,9 +315,12 @@ export default function PurchasePage() {
         toast.error('No sheets found in Excel file.')
         return
       }
-      const jsonRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets[firstSheet], {
-        defval: '',
-      })
+      const jsonRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(
+        workbook.Sheets[firstSheet],
+        {
+          defval: '',
+        }
+      )
       rows = jsonRows.map((row) => {
         const normalized: Record<string, string> = {}
         for (const key of Object.keys(row)) {
@@ -620,67 +628,69 @@ export default function PurchasePage() {
           <div className="bg-white rounded-xl border border-slate-200 p-4">
             <h3 className="text-sm font-semibold text-slate-800 mb-3">Create Purchase Order</h3>
             <form className="space-y-3" onSubmit={handleCreatePo}>
-            <input
-              value={poForm.po_number}
-              onChange={(e) => setPoForm((prev) => ({ ...prev, po_number: e.target.value }))}
-              placeholder="PO number"
-              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm min-h-touch"
-            />
-            <select
-              value={poForm.supplier_id ?? ''}
-              onChange={(e) =>
-                setPoForm((prev) => ({
-                  ...prev,
-                  supplier_id: e.target.value ? Number(e.target.value) : undefined,
-                }))
-              }
-              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm min-h-touch"
-            >
-              <option value="">Select supplier</option>
-              {suppliers.map((supplier) => (
-                <option key={supplier.id} value={supplier.id}>
-                  {supplier.name}
-                </option>
-              ))}
-            </select>
-            <div className="grid grid-cols-2 gap-2">
               <input
-                value={poForm.expected_by}
-                onChange={(e) => setPoForm((prev) => ({ ...prev, expected_by: e.target.value }))}
-                type="date"
-                className="border border-slate-300 rounded-lg px-3 py-2 text-sm min-h-touch"
+                value={poForm.po_number}
+                onChange={(e) => setPoForm((prev) => ({ ...prev, po_number: e.target.value }))}
+                placeholder="PO number"
+                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm min-h-touch"
               />
-              <input
-                value={poForm.total_amount}
+              <select
+                value={poForm.supplier_id ?? ''}
                 onChange={(e) =>
-                  setPoForm((prev) => ({ ...prev, total_amount: Number(e.target.value) || 0 }))
+                  setPoForm((prev) => ({
+                    ...prev,
+                    supplier_id: e.target.value ? Number(e.target.value) : undefined,
+                  }))
                 }
-                type="number"
-                min={0}
-                step="0.01"
-                placeholder="Expected total"
-                className="border border-slate-300 rounded-lg px-3 py-2 text-sm min-h-touch"
+                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm min-h-touch"
+              >
+                <option value="">Select supplier</option>
+                {suppliers.map((supplier) => (
+                  <option key={supplier.id} value={supplier.id}>
+                    {supplier.name}
+                  </option>
+                ))}
+              </select>
+              <div className="grid grid-cols-2 gap-2">
+                <input
+                  value={poForm.expected_by}
+                  onChange={(e) => setPoForm((prev) => ({ ...prev, expected_by: e.target.value }))}
+                  type="date"
+                  className="border border-slate-300 rounded-lg px-3 py-2 text-sm min-h-touch"
+                />
+                <input
+                  value={poForm.total_amount}
+                  onChange={(e) =>
+                    setPoForm((prev) => ({ ...prev, total_amount: Number(e.target.value) || 0 }))
+                  }
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  placeholder="Expected total"
+                  className="border border-slate-300 rounded-lg px-3 py-2 text-sm min-h-touch"
+                />
+              </div>
+              <textarea
+                value={poForm.notes}
+                onChange={(e) => setPoForm((prev) => ({ ...prev, notes: e.target.value }))}
+                rows={3}
+                placeholder="Notes"
+                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
               />
-            </div>
-            <textarea
-              value={poForm.notes}
-              onChange={(e) => setPoForm((prev) => ({ ...prev, notes: e.target.value }))}
-              rows={3}
-              placeholder="Notes"
-              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
-            />
-            <button
-              type="submit"
-              disabled={creatingPo}
-              className="w-full bg-slate-800 hover:bg-slate-900 disabled:bg-slate-400 text-white rounded-lg px-4 py-2 text-sm font-semibold min-h-touch"
-            >
-              {creatingPo ? 'Saving...' : 'Create Purchase Order'}
-            </button>
+              <button
+                type="submit"
+                disabled={creatingPo}
+                className="w-full bg-slate-800 hover:bg-slate-900 disabled:bg-slate-400 text-white rounded-lg px-4 py-2 text-sm font-semibold min-h-touch"
+              >
+                {creatingPo ? 'Saving...' : 'Create Purchase Order'}
+              </button>
             </form>
           </div>
 
           <div className="bg-white rounded-xl border border-slate-200 p-4">
-            <h3 className="text-sm font-semibold text-slate-800 mb-3">Purchase Return / Debit Note</h3>
+            <h3 className="text-sm font-semibold text-slate-800 mb-3">
+              Purchase Return / Debit Note
+            </h3>
             <form className="space-y-3" onSubmit={handleCreateReturn}>
               <input
                 value={returnForm.debit_note_no}
@@ -710,14 +720,19 @@ export default function PurchasePage() {
               <div className="grid grid-cols-2 gap-2">
                 <input
                   value={returnForm.return_date}
-                  onChange={(e) => setReturnForm((prev) => ({ ...prev, return_date: e.target.value }))}
+                  onChange={(e) =>
+                    setReturnForm((prev) => ({ ...prev, return_date: e.target.value }))
+                  }
                   type="date"
                   className="border border-slate-300 rounded-lg px-3 py-2 text-sm min-h-touch"
                 />
                 <input
                   value={returnForm.total_amount}
                   onChange={(e) =>
-                    setReturnForm((prev) => ({ ...prev, total_amount: Number(e.target.value) || 0 }))
+                    setReturnForm((prev) => ({
+                      ...prev,
+                      total_amount: Number(e.target.value) || 0,
+                    }))
                   }
                   type="number"
                   min={0}
@@ -765,9 +780,7 @@ export default function PurchasePage() {
                   {key}
                   <select
                     value={mapping[key as keyof typeof mapping]}
-                    onChange={(e) =>
-                      setMapping((prev) => ({ ...prev, [key]: e.target.value }))
-                    }
+                    onChange={(e) => setMapping((prev) => ({ ...prev, [key]: e.target.value }))}
                     className="mt-1 w-full border border-slate-300 rounded px-2 py-1 text-sm min-h-touch"
                   >
                     <option value="">Select column</option>
@@ -870,7 +883,10 @@ export default function PurchasePage() {
                         onChange={(e) =>
                           setParsedRows((prev) => {
                             const next = [...prev]
-                            next[index] = { ...next[index], unit_price: Number(e.target.value) || 0 }
+                            next[index] = {
+                              ...next[index],
+                              unit_price: Number(e.target.value) || 0,
+                            }
                             return next
                           })
                         }

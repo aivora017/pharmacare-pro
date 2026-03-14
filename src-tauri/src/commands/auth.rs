@@ -292,9 +292,10 @@ pub async fn auth_create_user(
     email: String,
     password: String,
     role_id: i64,
-    _created_by: i64,
+    created_by: i64,
 ) -> Result<i64, AppError> {
     let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+    require_admin(&db, created_by)?;
 
     validate_password_strength(&password)?;
 
@@ -316,8 +317,12 @@ pub async fn auth_create_user(
 
 /// List all active users (admin only).
 #[tauri::command]
-pub async fn auth_list_users(state: State<'_, AppState>) -> Result<Vec<UserDto>, AppError> {
+pub async fn auth_list_users(
+    state: State<'_, AppState>,
+    actor_user_id: i64,
+) -> Result<Vec<UserDto>, AppError> {
     let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+    require_admin(&db, actor_user_id)?;
     db.list_users()
 }
 
@@ -329,9 +334,10 @@ pub async fn auth_update_user(
     name: String,
     role_id: i64,
     is_active: bool,
-    _updated_by: i64,
+    updated_by: i64,
 ) -> Result<(), AppError> {
     let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+    require_admin(&db, updated_by)?;
     db.update_user(user_id, &name, role_id, is_active)?;
     db.write_audit_log(
         "USER_UPDATED",
@@ -360,6 +366,67 @@ fn validate_password_strength(password: &str) -> Result<(), AppError> {
         ));
     }
     Ok(())
+}
+
+fn require_admin(db: &crate::db::Database, actor_user_id: i64) -> Result<(), AppError> {
+    let actor = db.get_user(actor_user_id)?;
+    if !actor.is_active {
+        return Err(AppError::Forbidden);
+    }
+
+    let role = db.get_role(actor.role_id)?;
+    if actor.role_id == 1 || role.name.eq_ignore_ascii_case("admin") {
+        Ok(())
+    } else {
+        Err(AppError::Forbidden)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::require_admin;
+    use crate::db::Database;
+    use crate::error::AppError;
+    use std::path::PathBuf;
+
+    fn test_db_path(name: &str) -> PathBuf {
+        let suffix = chrono::Utc::now()
+            .timestamp_nanos_opt()
+            .unwrap_or_default();
+        std::env::temp_dir().join(format!("pharmacare_auth_test_{}_{}.db", name, suffix))
+    }
+
+    fn create_user_with_role(db: &Database, role_name: &str, name: &str) -> i64 {
+        let role_id = db
+            .role_id_by_name(role_name)
+            .expect("role must exist in seeded data");
+        db.create_user(name, &format!("{}@example.test", name), "hash", role_id)
+            .expect("user creation should succeed")
+    }
+
+    #[test]
+    fn require_admin_denies_non_admin_roles() {
+        let db_path = test_db_path("require_admin_denied");
+        let db = Database::init_for_test(db_path.clone()).expect("test db init");
+        let cashier_id = create_user_with_role(&db, "cashier", "cashier_admin_guard");
+
+        let result = require_admin(&db, cashier_id);
+        assert!(matches!(result, Err(AppError::Forbidden)));
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn require_admin_allows_admin_role() {
+        let db_path = test_db_path("require_admin_allowed");
+        let db = Database::init_for_test(db_path.clone()).expect("test db init");
+        let admin_id = create_user_with_role(&db, "admin", "admin_guard_ok");
+
+        let result = require_admin(&db, admin_id);
+        assert!(result.is_ok());
+
+        let _ = std::fs::remove_file(db_path);
+    }
 }
 
 fn generate_jwt(user_id: i64, role_id: i64) -> Result<String, AppError> {

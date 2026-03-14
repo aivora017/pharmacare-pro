@@ -3,13 +3,19 @@
  * Saved to DB only when billing_create_bill is called.
  * All mutations recalculate GST automatically.
  */
-import { create } from "zustand"
-import { calculateItemGST, calculateBillTotals, emptyTotals, type BillTotals } from "@/utils/gst"
-import type { ICartItem, ICustomer } from "@/types"
+import { create } from 'zustand'
+import { calculateItemGST, calculateBillTotals, emptyTotals, type BillTotals } from '@/utils/gst'
+import type { ICartItem, ICustomer } from '@/types'
 
 type CartCustomer = Pick<
   ICustomer,
-  "id" | "name" | "phone" | "outstanding_balance" | "loyalty_points" | "allergies" | "chronic_conditions"
+  | 'id'
+  | 'name'
+  | 'phone'
+  | 'outstanding_balance'
+  | 'loyalty_points'
+  | 'allergies'
+  | 'chronic_conditions'
 >
 
 interface CartStore {
@@ -27,30 +33,43 @@ interface CartStore {
 }
 
 export const useCartStore = create<CartStore>((set, get) => ({
-  items: [], customer: null, billDiscount: 0, totals: emptyTotals,
+  items: [],
+  customer: null,
+  billDiscount: 0,
+  totals: emptyTotals,
 
   addItem: (raw) => {
     const item = calculateItemGST({ ...raw })
-    const idx  = get().items.findIndex(i => i.batch_id === item.batch_id)
-    const items = idx >= 0
-      ? get().items.map((i,n) => n===idx ? calculateItemGST({...i, quantity: i.quantity+item.quantity}) : i)
-      : [...get().items, item]
+    const idx = get().items.findIndex((i) => i.batch_id === item.batch_id)
+    const items =
+      idx >= 0
+        ? get().items.map((i, n) =>
+            n === idx ? calculateItemGST({ ...i, quantity: i.quantity + item.quantity }) : i
+          )
+        : [...get().items, item]
     set({ items, totals: calculateBillTotals(items, get().billDiscount) })
   },
 
   removeItem: (idx) => {
-    const items = get().items.filter((_,i) => i !== idx)
+    const items = get().items.filter((_, i) => i !== idx)
     set({ items, totals: calculateBillTotals(items, get().billDiscount) })
   },
 
   updateQuantity: (idx, qty) => {
-    if (qty <= 0) { get().removeItem(idx); return }
-    const items = get().items.map((i,n) => n===idx ? calculateItemGST({...i, quantity: qty}) : i)
+    if (qty <= 0) {
+      get().removeItem(idx)
+      return
+    }
+    const items = get().items.map((i, n) =>
+      n === idx ? calculateItemGST({ ...i, quantity: qty }) : i
+    )
     set({ items, totals: calculateBillTotals(items, get().billDiscount) })
   },
 
   updateItemDiscount: (idx, pct) => {
-    const items = get().items.map((i,n) => n===idx ? calculateItemGST({...i, discount_percent: pct}) : i)
+    const items = get().items.map((i, n) =>
+      n === idx ? calculateItemGST({ ...i, discount_percent: pct }) : i
+    )
     set({ items, totals: calculateBillTotals(items, get().billDiscount) })
   },
 

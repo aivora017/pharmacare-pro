@@ -8,6 +8,7 @@ pub mod email_import;
 pub mod inventory;
 pub mod license;
 pub mod medicine;
+pub mod permission;
 pub mod printer;
 pub mod purchase;
 pub mod reports;

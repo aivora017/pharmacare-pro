@@ -10,6 +10,6 @@ export const licenseService = {
     invoke<LicenseStatus>("license_get_status"),
   validate:   async (): Promise<LicenseStatus> =>
     invoke<LicenseStatus>("license_validate"),
-  activate:   async (licenseKey: string): Promise<LicenseStatus> =>
-    invoke<LicenseStatus>("license_activate", { licenseKey }),
+  activate:   async (licenseKey: string, actorUserId: number): Promise<LicenseStatus> =>
+    invoke<LicenseStatus>("license_activate", { licenseKey, actorUserId }),
 }

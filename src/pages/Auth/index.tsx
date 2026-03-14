@@ -26,6 +26,8 @@ export default function LoginPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (loading) return
+
     setError('')
     if (!email.trim() || !password.trim()) {
       setError('Please enter your username/email and password.')
@@ -37,10 +39,9 @@ export default function LoginPage() {
       toast.success('Welcome back!')
       navigate('/dashboard', { replace: true })
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err)
-      if (msg.includes('locked')) setError('Account is locked. Please contact the admin.')
-      else if (msg.includes('disabled')) setError('Account is disabled. Please contact the admin.')
-      else setError('Email or password is incorrect. Please try again.')
+      const message =
+        err instanceof Error ? err.message : 'Unable to sign in right now. Please try again.'
+      setError(message)
     } finally {
       setLoading(false)
     }

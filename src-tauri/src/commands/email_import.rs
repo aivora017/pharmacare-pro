@@ -11,6 +11,7 @@
 //! 6. Parse file, show review UI
 //! 7. On confirm: call purchase_create_bill with source="email_import"
 
+use crate::commands::permission::require_permission;
 use crate::{error::AppError, AppState};
 use tauri::State;
 
@@ -37,6 +38,7 @@ pub async fn email_import_bill(
     user_id: i64,
 ) -> Result<i64, AppError> {
     let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+    require_permission(&db, user_id, "purchase")?;
     db.email_import_bill(import_id, &data, user_id)
 }
 #[tauri::command]

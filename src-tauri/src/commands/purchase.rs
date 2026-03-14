@@ -14,6 +14,7 @@
 //! 5. Show review screen (frontend) before saving
 //! 6. On confirm: call purchase_create_bill with source="email_import"
 
+use crate::commands::permission::require_permission;
 use crate::{error::AppError, AppState};
 use serde::Deserialize;
 use tauri::State;
@@ -70,6 +71,7 @@ pub async fn purchase_create_bill(
     user_id: i64,
 ) -> Result<i64, AppError> {
     let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+    require_permission(&db, user_id, "purchase")?;
     db.purchase_create_bill(&data, user_id)
 }
 #[tauri::command]
@@ -95,6 +97,7 @@ pub async fn purchase_create_po(
     user_id: i64,
 ) -> Result<i64, AppError> {
     let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+    require_permission(&db, user_id, "purchase")?;
     db.purchase_create_po(&data, user_id)
 }
 #[tauri::command]
@@ -104,6 +107,7 @@ pub async fn purchase_create_supplier(
     user_id: i64,
 ) -> Result<i64, AppError> {
     let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+    require_permission(&db, user_id, "suppliers")?;
     db.purchase_create_supplier(&data, user_id)
 }
 #[tauri::command]
@@ -121,6 +125,7 @@ pub async fn purchase_update_supplier(
     user_id: i64,
 ) -> Result<(), AppError> {
     let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+    require_permission(&db, user_id, "suppliers")?;
     db.purchase_update_supplier(id, &data, user_id)
 }
 
@@ -131,5 +136,6 @@ pub async fn purchase_create_return(
     user_id: i64,
 ) -> Result<i64, AppError> {
     let db = state.db.lock().map_err(|_| AppError::DatabaseLock)?;
+    require_permission(&db, user_id, "purchase")?;
     db.purchase_create_return(&data, user_id)
 }
