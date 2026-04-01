@@ -1,0 +1,45 @@
+[package]
+name = "pharmacare-pro"
+version = "1.0.0"
+edition = "2021"
+description = "PharmaCare Pro — Complete Pharmacy Management"
+publish = false
+
+[lib]
+name = "pharmacare_pro_lib"
+crate-type = ["staticlib","cdylib","rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri               = { version = "2", features = [] }
+tauri-plugin-shell  = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-fs     = "2"
+rusqlite   = { version = "0.31", features = ["bundled"] }
+serde      = { version = "1",    features = ["derive"] }
+serde_json = "1"
+bcrypt     = "0.15"
+uuid       = { version = "1",    features = ["v4"] }
+chrono     = { version = "0.4",  features = ["serde"] }
+thiserror  = "1"
+tokio      = { version = "1",    features = ["full"] }
+reqwest    = { version = "0.12", features = ["json","rustls-tls"], default-features = false }
+zip        = "0.6"
+axum       = { version = "0.7",  features = ["macros"] }
+tower-http = { version = "0.5",  features = ["cors"] }
+local-ip-address = "0.6"
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
+
+[profile.dev]
+incremental = true

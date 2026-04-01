@@ -1,0 +1,1 @@
+const M:Record<string,string>={active:'badge-green',paid:'badge-green',unpaid:'badge-red',cancelled:'badge-red',expired:'badge-red',partial:'badge-amber',pending:'badge-amber',draft:'badge-slate',inactive:'badge-slate'};export function StatusBadge({status}:{status:string}){return<span className={M[status.toLowerCase()]??'badge-slate'}>{status}</span>}

@@ -1,0 +1,5 @@
+interface P{open:boolean;title:string;message:string;confirmText?:string;danger?:boolean;loading?:boolean;onConfirm:()=>void;onCancel:()=>void;children?:React.ReactNode}
+export function ConfirmDialog({open,title,message,confirmText='Delete',danger=true,loading,onConfirm,onCancel,children}:P){
+  if(!open)return null
+  return(<div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 animate-fade-in"><div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 animate-slide-up"><h3 className="text-lg font-semibold text-slate-900 mb-2">{title}</h3><p className="text-slate-600 text-sm mb-4 leading-relaxed">{message}</p>{children}{!children&&<div className="mb-6"/>}<div className="flex gap-3 justify-end"><button onClick={onCancel} className="btn-secondary">Cancel</button><button onClick={onConfirm} disabled={loading} className={danger?"btn-danger":"btn-primary"}>{loading?<span className="flex items-center gap-2"><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"/>Processing...</span>:confirmText}</button></div></div></div>)
+}

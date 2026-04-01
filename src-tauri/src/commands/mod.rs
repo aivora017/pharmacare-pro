@@ -1,0 +1,16 @@
+pub mod auth;
+pub mod settings;
+pub mod dashboard;
+pub mod medicine;
+pub mod billing;
+pub mod customer;
+pub mod purchase;
+pub mod inventory;
+pub mod printer;
+pub mod reports;
+pub mod ai;
+pub mod barcode;
+pub mod backup;
+pub mod network;
+pub mod gst;
+pub mod compliance;

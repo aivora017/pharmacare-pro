@@ -1,0 +1,60 @@
+# ─── Dependencies ─────────────────────────────────────────
+node_modules/
+
+# ─── Build Outputs ────────────────────────────────────────
+dist/
+dist-ssr/
+build/
+
+# ─── Tauri Build Artifacts ────────────────────────────────
+src-tauri/target/
+src-tauri/WixTools/
+*.AppImage
+*.deb
+*.dmg
+*.exe
+*.msi
+*.rpm
+
+# ─── Environment & Secrets ───────────────────────────────
+.env
+.env.local
+.env.production
+.env.*.local
+*.pem
+*.key
+
+# ─── Database Files (contain patient/billing data) ───────
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# ─── Pharmacy Operational Data (private) ─────────────────
+backups/
+print_jobs/
+exports/
+data/
+
+# ─── Logs ─────────────────────────────────────────────────
+logs/
+*.log
+
+# ─── OS ───────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ─── IDE ──────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ─── TypeScript ───────────────────────────────────────────
+*.tsbuildinfo
+
+# ─── Misc ─────────────────────────────────────────────────
+*.tmp
+*.bak
