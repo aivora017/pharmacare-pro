@@ -1,21 +1,25 @@
-import{NavLink}from"react-router-dom"
-import{LayoutDashboard,ShoppingCart,Pill,Package,Users,Stethoscope,Truck,AlertTriangle,Barcode,BarChart3,Bot,Settings,ChevronLeft,ChevronRight,LogOut,ClipboardList,Receipt,Wifi,RefreshCw as Cloud,FileJson,ShieldCheck}from"lucide-react"
+import{NavLink,useNavigate}from"react-router-dom"
+import{LayoutDashboard,ShoppingCart,Pill,Package,Users,Stethoscope,Truck,AlertTriangle,Barcode,BarChart3,Bot,Settings,ChevronLeft,ChevronRight,LogOut,ClipboardList,Receipt,Wifi,RefreshCw as Cloud,FileJson,ShieldCheck,ClipboardCheck,RotateCcw,Wallet,Tag,IndianRupee,Lock}from"lucide-react"
 import{useState}from"react"
 import{useAuthStore}from"@/store/authStore"
+import{useSettingsStore}from"@/store/settingsStore"
 import{cn}from"@/utils/cn"
 
 const NAV=[
   {section:"Daily Work",items:[{label:"Dashboard",icon:LayoutDashboard,path:"/dashboard"},{label:"New Bill",icon:ShoppingCart,path:"/billing",shortcut:"F2"},{label:"Bill History",icon:Receipt,path:"/bills"}]},
-  {section:"Stock",items:[{label:"Medicines",icon:Pill,path:"/medicine"},{label:"Purchase",icon:Package,path:"/purchase"},{label:"Suppliers",icon:Truck,path:"/suppliers"},{label:"Expiry Check",icon:AlertTriangle,path:"/expiry"},{label:"Stock Adjust",icon:ClipboardList,path:"/stock-adjust"},{label:"Barcodes",icon:Barcode,path:"/barcodes"}]},
+  {section:"Stock",items:[{label:"Medicines",icon:Pill,path:"/medicine"},{label:"Purchase",icon:Package,path:"/purchase"},{label:"Purchase Orders",icon:ClipboardCheck,path:"/purchase-orders"},{label:"Suppliers",icon:Truck,path:"/suppliers"},{label:"Expiry Check",icon:AlertTriangle,path:"/expiry"},{label:"Stock Adjust",icon:ClipboardList,path:"/stock-adjust"},{label:"Barcodes",icon:Barcode,path:"/barcodes"}]},
   {section:"People",items:[{label:"Customers",icon:Users,path:"/customers"},{label:"Doctors",icon:Stethoscope,path:"/doctors"}]},
   {section:"Insights",items:[{label:"Reports",icon:BarChart3,path:"/reports"},{label:"AI Assistant",icon:Bot,path:"/ai"}]},
   {section:"Compliance",items:[{label:"GST Filing",icon:FileJson,path:"/gst-compliance"},{label:"Compliance",icon:ShieldCheck,path:"/compliance"}]},
+  {section:"Finance",items:[{label:"Expenses",icon:Wallet,path:"/expenses"},{label:"Supplier Credit",icon:RotateCcw,path:"/supplier-credit"},{label:"Schemes",icon:Tag,path:"/schemes"},{label:"Collections",icon:IndianRupee,path:"/collections"}]},
   {section:"System",items:[{label:"Multi-PC LAN",icon:Wifi,path:"/network"},{label:"Cloud Sync",icon:Cloud,path:"/sync"}]},
 ]
 
 export function Sidebar(){
   const[collapsed,setCollapsed]=useState(false)
   const{user,logout}=useAuthStore()
+  const{gstEnabled}=useSettingsStore()
+  const navigate=useNavigate()
   return(
     <aside className={cn("flex flex-col h-screen bg-slate-900 text-white transition-all duration-200 flex-shrink-0",collapsed?"w-[60px]":"w-[220px]")}>
       <div className={cn("flex items-center gap-3 border-b border-slate-800 flex-shrink-0",collapsed?"px-3 py-4 justify-center":"px-4 py-4")}>
@@ -26,13 +30,31 @@ export function Sidebar(){
         {NAV.map(g=>(
           <div key={g.section} className="mb-4">
             {!collapsed&&<p className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest px-2 mb-1">{g.section}</p>}
-            {g.items.map(item=>(
-              <NavLink key={item.path} to={item.path} title={collapsed?item.label:undefined}
-                className={({isActive})=>cn("flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] font-medium transition-colors mb-0.5",isActive?"bg-blue-600 text-white":"text-slate-400 hover:bg-slate-800 hover:text-white")}>
-                <item.icon size={16} className="flex-shrink-0"/>
-                {!collapsed&&<><span className="flex-1 truncate">{item.label}</span>{"shortcut"in item&&<kbd className="text-[10px] text-slate-500 font-mono">{(item as {shortcut:string}).shortcut}</kbd>}</>}
-              </NavLink>
-            ))}
+            {g.items.map(item=>{
+              // GST Filing is locked when GST not enabled
+              const isGstFiling=item.path==="/gst-compliance"
+              if(isGstFiling&&!gstEnabled){
+                return(
+                  <button key={item.path}
+                    title={collapsed?"GST Filing (add GSTIN to unlock)":undefined}
+                    onClick={()=>navigate("/settings")}
+                    className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] font-medium transition-colors mb-0.5 text-slate-600 hover:bg-slate-800 hover:text-slate-400 cursor-pointer">
+                    <item.icon size={16} className="flex-shrink-0 opacity-40"/>
+                    {!collapsed&&<>
+                      <span className="flex-1 truncate opacity-40">{item.label}</span>
+                      <Lock size={11} className="text-slate-600 flex-shrink-0"/>
+                    </>}
+                  </button>
+                )
+              }
+              return(
+                <NavLink key={item.path} to={item.path} title={collapsed?item.label:undefined}
+                  className={({isActive})=>cn("flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] font-medium transition-colors mb-0.5",isActive?"bg-blue-600 text-white":"text-slate-400 hover:bg-slate-800 hover:text-white")}>
+                  <item.icon size={16} className="flex-shrink-0"/>
+                  {!collapsed&&<><span className="flex-1 truncate">{item.label}</span>{"shortcut"in item&&<kbd className="text-[10px] text-slate-500 font-mono">{(item as {shortcut:string}).shortcut}</kbd>}</>}
+                </NavLink>
+              )
+            })}
           </div>
         ))}
       </nav>

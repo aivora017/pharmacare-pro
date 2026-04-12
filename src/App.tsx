@@ -2,6 +2,7 @@ import { Suspense, lazy, useEffect, Component, type ReactNode } from "react"
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom"
 import { Toaster } from "react-hot-toast"
 import { useAuthStore } from "@/store/authStore"
+import { useSettingsStore } from "@/store/settingsStore"
 import { Spinner } from "@/components/shared/Spinner"
 
 // ── Error boundary — shows error instead of blank page ───────
@@ -26,6 +27,7 @@ class ErrorBoundary extends Component<{ children: ReactNode }, EBState> {
 }
 
 const AuthPage       = lazy(() => import("@/pages/Auth"))
+const TechSetupPage  = lazy(() => import("@/pages/TechSetup"))
 const DashboardPage  = lazy(() => import("@/pages/Dashboard"))
 const BillingPage    = lazy(() => import("@/pages/Billing"))
 const MedicinePage   = lazy(() => import("@/pages/Medicine"))
@@ -44,6 +46,12 @@ const NetworkPage    = lazy(() => import("@/pages/Network"))
 const SyncPage       = lazy(() => import("@/pages/Sync"))
 const GSTCompliancePage = lazy(() => import("@/pages/GSTCompliance"))
 const CompliancePage    = lazy(() => import("@/pages/Compliance"))
+const PurchaseOrdersPage = lazy(() => import("@/pages/PurchaseOrders"))
+const ExpensesPage       = lazy(() => import("@/pages/Expenses"))
+const SupplierCreditPage = lazy(() => import("@/pages/SupplierCredit"))
+const SchemesPage        = lazy(() => import("@/pages/Schemes"))
+const CollectionsPage    = lazy(() => import("@/pages/Collections"))
+const OnboardingPage     = lazy(() => import("@/pages/Onboarding"))
 const Layout         = lazy(() => import("@/components/layout/Layout").then(m => ({ default: m.Layout })))
 
 function Loader() {
@@ -59,14 +67,18 @@ function Loader() {
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuthStore()
+  const { onboardingComplete } = useSettingsStore()
   if (isLoading) return <Loader />
   if (!isAuthenticated) return <Navigate to="/login" replace />
+  if (!onboardingComplete) return <Navigate to="/onboarding" replace />
   return <>{children}</>
 }
 
 export default function App() {
   const { restoreSession } = useAuthStore()
+  const { loadStatus } = useSettingsStore()
   useEffect(() => { restoreSession() }, [restoreSession])
+  useEffect(() => { loadStatus() }, [loadStatus])
 
   return (
     <BrowserRouter>
@@ -83,6 +95,8 @@ export default function App() {
         <Suspense fallback={<Loader />}>
           <Routes>
             <Route path="/login" element={<AuthPage />} />
+            <Route path="/tech" element={<TechSetupPage />} />
+            <Route path="/onboarding" element={<OnboardingPage />} />
             <Route path="/" element={<RequireAuth><Layout /></RequireAuth>}>
               <Route index element={<Navigate to="/dashboard" replace />} />
               <Route path="dashboard"   element={<DashboardPage />} />
@@ -100,8 +114,13 @@ export default function App() {
               <Route path="ai"          element={<AIPage />} />
               <Route path="network"     element={<NetworkPage />} />
               <Route path="sync"        element={<SyncPage />} />
-              <Route path="gst-compliance" element={<GSTCompliancePage />} />
-              <Route path="compliance"     element={<CompliancePage />} />
+              <Route path="gst-compliance"  element={<GSTCompliancePage />} />
+              <Route path="compliance"      element={<CompliancePage />} />
+              <Route path="purchase-orders" element={<PurchaseOrdersPage />} />
+              <Route path="expenses"        element={<ExpensesPage />} />
+              <Route path="supplier-credit" element={<SupplierCreditPage />} />
+              <Route path="schemes"         element={<SchemesPage />} />
+              <Route path="collections"     element={<CollectionsPage />} />
               <Route path="settings"    element={<SettingsPage />} />
               <Route path="*"           element={<Navigate to="/dashboard" replace />} />
             </Route>

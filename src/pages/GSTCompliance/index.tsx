@@ -1,10 +1,12 @@
 import { useState, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   FileJson, Calculator, GitMerge, Zap, Truck,
-  Download, RefreshCw, AlertTriangle, CheckCircle,
+  Download, RefreshCw, AlertTriangle, CheckCircle, Lock, ArrowRight,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { gstService, Gstr1Result, Gstr3bResult } from '@/services/gstService';
+import { useSettingsStore } from '@/store/settingsStore';
 
 const MONTHS = [
   'Jan','Feb','Mar','Apr','May','Jun',
@@ -310,8 +312,8 @@ function EInvoiceTab() {
 
   return (
     <div className="space-y-4 max-w-lg">
-      <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-700">
-        Configure IRP API credentials in <strong>Settings → GST Compliance</strong> to enable live IRN generation.
+      <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-700">
+        <strong>Sandbox mode active.</strong> IRN generated will be test-only. Switch to Production in Settings → GST Compliance when ready.
       </div>
       <div className="flex gap-3">
         <input value={billId} onChange={e => setBillId(e.target.value)} placeholder="Bill ID"
@@ -319,15 +321,23 @@ function EInvoiceTab() {
         <button onClick={generate} disabled={loading}
           className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50">
           <Zap className="w-4 h-4" />
-          Generate IRN
+          {loading ? 'Generating…' : 'Generate IRN'}
         </button>
       </div>
       {result && (
-        <div className={`rounded-xl p-4 border text-sm ${result.irn ? 'bg-green-50 border-green-200' : 'bg-slate-50 border-slate-200'}`}>
-          <div><strong>Bill:</strong> {result.bill_number}</div>
-          <div><strong>Status:</strong> {result.status}</div>
-          {result.irn && <div><strong>IRN:</strong> <code className="text-xs">{result.irn}</code></div>}
-          {!result.irn && <div className="text-slate-500">{result.message}</div>}
+        <div className={`rounded-xl p-4 border text-sm space-y-1.5 ${(result as Record<string,unknown>).irn ? 'bg-green-50 border-green-200' : 'bg-slate-50 border-slate-200'}`}>
+          <div><strong>Bill:</strong> {(result as Record<string,unknown>).bill_number as string}</div>
+          <div><strong>Status:</strong> <span className="capitalize">{(result as Record<string,unknown>).status as string}</span>
+            {(result as Record<string,unknown>).sandbox && <span className="ml-2 text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full">sandbox</span>}
+          </div>
+          {(result as Record<string,unknown>).irn && (
+            <>
+              <div><strong>IRN:</strong> <code className="text-xs break-all">{(result as Record<string,unknown>).irn as string}</code></div>
+              {(result as Record<string,unknown>).ack_no && <div><strong>Ack No:</strong> {(result as Record<string,unknown>).ack_no as string}</div>}
+              {(result as Record<string,unknown>).ack_date && <div><strong>Ack Date:</strong> {(result as Record<string,unknown>).ack_date as string}</div>}
+            </>
+          )}
+          {!(result as Record<string,unknown>).irn && <div className="text-slate-500">{(result as Record<string,unknown>).message as string}</div>}
         </div>
       )}
     </div>
@@ -353,8 +363,8 @@ function EWayBillTab() {
 
   return (
     <div className="space-y-4 max-w-lg">
-      <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-700">
-        Configure NIC E-Way Bill credentials in <strong>Settings → GST Compliance</strong> to enable live generation.
+      <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-700">
+        <strong>Sandbox mode active.</strong> EWB generated will be test-only. Only required for bills ≥ ₹50,000.
       </div>
       <div className="flex gap-3">
         <input value={billId} onChange={e => setBillId(e.target.value)} placeholder="Bill ID"
@@ -362,15 +372,23 @@ function EWayBillTab() {
         <button onClick={generate} disabled={loading}
           className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50">
           <Truck className="w-4 h-4" />
-          Generate EWB
+          {loading ? 'Generating…' : 'Generate EWB'}
         </button>
       </div>
       {result && (
-        <div className="rounded-xl p-4 border bg-slate-50 border-slate-200 text-sm">
-          <div><strong>Bill:</strong> {result.bill_number}</div>
-          <div><strong>Status:</strong> {result.status}</div>
-          {result.ewb_no && <div><strong>EWB No:</strong> {result.ewb_no}</div>}
-          {!result.ewb_no && <div className="text-slate-500">{result.message}</div>}
+        <div className={`rounded-xl p-4 border text-sm space-y-1.5 ${(result as Record<string,unknown>).ewb_no ? 'bg-green-50 border-green-200' : 'bg-slate-50 border-slate-200'}`}>
+          <div><strong>Bill:</strong> {(result as Record<string,unknown>).bill_number as string}</div>
+          <div><strong>Status:</strong> <span className="capitalize">{(result as Record<string,unknown>).status as string}</span>
+            {(result as Record<string,unknown>).sandbox && <span className="ml-2 text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full">sandbox</span>}
+          </div>
+          {(result as Record<string,unknown>).ewb_no && (
+            <>
+              <div><strong>EWB No:</strong> {(result as Record<string,unknown>).ewb_no as string}</div>
+              {(result as Record<string,unknown>).ewb_date && <div><strong>EWB Date:</strong> {(result as Record<string,unknown>).ewb_date as string}</div>}
+              {(result as Record<string,unknown>).valid_until && <div><strong>Valid Until:</strong> {(result as Record<string,unknown>).valid_until as string}</div>}
+            </>
+          )}
+          {!(result as Record<string,unknown>).ewb_no && <div className="text-slate-500">{(result as Record<string,unknown>).message as string}</div>}
         </div>
       )}
     </div>
@@ -387,6 +405,29 @@ const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
 
 export default function GSTCompliancePage() {
   const [tab, setTab] = useState<Tab>('gstr1');
+  const { gstEnabled } = useSettingsStore();
+  const navigate = useNavigate();
+
+  if (!gstEnabled) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full py-24 px-6 text-center">
+        <div className="w-16 h-16 bg-slate-100 rounded-2xl flex items-center justify-center mb-5">
+          <Lock size={28} className="text-slate-400" />
+        </div>
+        <h2 className="text-xl font-bold text-slate-800 mb-2">GST Features Locked</h2>
+        <p className="text-slate-500 text-sm max-w-sm mb-6">
+          Add your GSTIN in Settings to unlock GSTR filing, E-Invoice, E-Way Bill, and all GST compliance features.
+        </p>
+        <div className="space-y-3">
+          <button onClick={() => navigate('/settings')}
+            className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl transition-colors">
+            Go to Settings <ArrowRight size={16} />
+          </button>
+          <p className="text-xs text-slate-400">Settings → Business Profile → GST Registration</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 space-y-6">

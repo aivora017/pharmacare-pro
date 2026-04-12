@@ -1,12 +1,13 @@
 import { invoke } from "@tauri-apps/api/core"
 import { useEffect, useState } from "react"
-import { Save, Printer, Building2, User, Key, Download, Users, Wifi as WifiIcon, RefreshCw as CloudIcon, ShieldCheck as ShieldIcon, FileJson } from "lucide-react"
+import { Save, Printer, Building2, User, Key, Download, Users, Wifi as WifiIcon, RefreshCw as CloudIcon, ShieldCheck as ShieldIcon, FileJson, CheckCircle, AlertCircle, Loader2, MessageSquare, Send } from "lucide-react"
 import toast from "react-hot-toast"
 import { settingsService } from "@/services/settingsService"
 import { backupService } from "@/services/backupService"
 import { UserManagement } from "./UserManagement"
 import { printerService } from "@/services/printerService"
 import { useAuthStore } from "@/store/authStore"
+import { useSettingsStore } from "@/store/settingsStore"
 import { GstComplianceTab } from "./GstComplianceTab"
 import { PageHeader } from "@/components/shared/PageHeader"
 import { Spinner } from "@/components/shared/Spinner"
@@ -132,14 +133,20 @@ function LicensePanel() {
   )
 }
 
+const REG_TYPES = ["Regular", "Composite", "SEZ", "Casual Taxable Person", "Unregistered"]
+
 export default function SettingsPage() {
   const { user } = useAuthStore()
   const uid = user?.id ?? 1
+  const { setGstEnabled } = useSettingsStore()
   const [settings, setSettings] = useState<SettingsData>({})
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [testingPrint, setTestingPrint] = useState(false)
   const [activeTab, setActiveTab] = useState("pharmacy")
+  // GSTIN verify state
+  const [verifying, setVerifying] = useState(false)
+  const [gstinStatus, setGstinStatus] = useState<{ valid: boolean; message: string } | null>(null)
 
   useEffect(() => {
     settingsService.getAll().then(s => { setSettings(s as SettingsData); setLoading(false) })
@@ -182,8 +189,9 @@ export default function SettingsPage() {
   { id: "network",  label: "LAN Mode",         icon: WifiIcon },
   { id: "sync",     label: "Cloud Sync",       icon: CloudIcon},
   { id: "license",       label: "License",          icon: ShieldIcon },
-  { id: "gst_compliance", label: "GST Compliance",  icon: FileJson   },
-  { id: "account",       label: "My Account",       icon: User       },
+  { id: "gst_compliance", label: "GST Compliance",  icon: FileJson      },
+  { id: "sms",            label: "SMS",             icon: MessageSquare },
+  { id: "account",        label: "My Account",       icon: User         },
   ]
 
   return (
@@ -200,41 +208,161 @@ export default function SettingsPage() {
       </div>
 
       {activeTab === "pharmacy" && (
-        <div className="card p-6 space-y-5">
-          <h2 className="font-semibold text-slate-800">Pharmacy Information</h2>
-          <p className="text-sm text-slate-500 -mt-3">This information appears on your receipts and reports.</p>
-          <div className="space-y-4">
+        <div className="space-y-4">
+          {/* Basic info */}
+          <div className="card p-6 space-y-4">
             <div>
-              <label className="label">Pharmacy Name <span className="text-red-500">*</span></label>
-              <input value={get("pharmacy_name")} onChange={e => set("pharmacy_name", e.target.value)}
-                placeholder="e.g. Jagannath Medical Store" className="input" />
+              <h2 className="font-semibold text-slate-800">Business Profile</h2>
+              <p className="text-sm text-slate-500 mt-0.5">Appears on receipts, reports, and GST documents.</p>
             </div>
-            <div>
-              <label className="label">Address</label>
-              <input value={get("pharmacy_address")} onChange={e => set("pharmacy_address", e.target.value)}
-                placeholder="Full address" className="input" />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-4">
               <div>
-                <label className="label">Phone</label>
-                <input value={get("pharmacy_phone")} onChange={e => set("pharmacy_phone", e.target.value)}
-                  placeholder="Mobile number" className="input" />
+                <label className="label">Pharmacy / Store Name <span className="text-red-500">*</span></label>
+                <input value={get("pharmacy_name")} onChange={e => set("pharmacy_name", e.target.value)}
+                  placeholder="e.g. Jagannath Medical Store" className="input" />
               </div>
               <div>
-                <label className="label">GSTIN</label>
-                <input value={get("gstin")} onChange={e => set("gstin", e.target.value)}
-                  placeholder="22AAAAA0000A1Z5" className="input font-mono" />
+                <label className="label">Full Address</label>
+                <input value={get("pharmacy_address")} onChange={e => set("pharmacy_address", e.target.value)}
+                  placeholder="Shop no, Street, Area, City" className="input" />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="label">Phone</label>
+                  <input value={get("pharmacy_phone")} onChange={e => set("pharmacy_phone", e.target.value)}
+                    placeholder="10-digit mobile" className="input" />
+                </div>
+                <div>
+                  <label className="label">PIN Code</label>
+                  <input value={get("pin_code")} onChange={e => set("pin_code", e.target.value)}
+                    placeholder="421301" className="input" maxLength={6} />
+                </div>
               </div>
               <div>
-                <label className="label">Drug Licence No.</label>
-                <input value={get("drug_licence_no")} onChange={e => set("drug_licence_no", e.target.value)} className="input" />
+                <label className="label">Drug Licence Number</label>
+                <input value={get("drug_licence_no")} onChange={e => set("drug_licence_no", e.target.value)}
+                  placeholder="e.g. MH-KL-12345" className="input" />
               </div>
             </div>
+            <button onClick={() => saveSettings(["pharmacy_name","pharmacy_address","pharmacy_phone","pin_code","drug_licence_no"])}
+              disabled={saving} className="btn-primary">
+              {saving ? <><Spinner size="sm" />Saving…</> : <><Save size={16} />Save</>}
+            </button>
           </div>
-          <button onClick={() => saveSettings(["pharmacy_name","pharmacy_address","pharmacy_phone","gstin","drug_licence_no"])}
-            disabled={saving} className="btn-primary">
-            {saving ? <><Spinner size="sm" />Saving…</> : <><Save size={16} />Save Pharmacy Info</>}
-          </button>
+
+          {/* GST section */}
+          <div className="card p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="font-semibold text-slate-800">GST Registration</h2>
+                <p className="text-sm text-slate-500 mt-0.5">
+                  {get("gst_enabled") === "true"
+                    ? "GST features are active."
+                    : "Add your GSTIN to unlock GST billing, GSTR filing, and E-Invoice."}
+                </p>
+              </div>
+              {get("gst_enabled") === "true" && (
+                <span className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 bg-green-100 text-green-700 rounded-full">
+                  <CheckCircle size={12} /> GST Active
+                </span>
+              )}
+            </div>
+
+            {/* GSTIN input + verify */}
+            <div>
+              <label className="label">GSTIN</label>
+              <div className="flex gap-2">
+                <input
+                  value={get("gstin")}
+                  onChange={e => {
+                    set("gstin", e.target.value.toUpperCase())
+                    setGstinStatus(null)
+                  }}
+                  placeholder="27AAAAA0000A1Z5"
+                  className="input font-mono flex-1"
+                  maxLength={15}
+                />
+                <button
+                  onClick={async () => {
+                    const gstin = get("gstin")
+                    if (gstin.length < 15) { toast.error("Enter complete 15-character GSTIN."); return }
+                    setVerifying(true); setGstinStatus(null)
+                    try {
+                      const res = await invoke<{ valid: boolean; state_code: string; state_name: string; message: string }>(
+                        "gstin_verify", { gstin }
+                      )
+                      setGstinStatus({ valid: res.valid, message: res.message })
+                      if (res.valid) {
+                        set("state_code", res.state_code)
+                        set("state_name", res.state_name)
+                        toast.success(`GSTIN valid · ${res.state_name}`)
+                      }
+                    } catch { setGstinStatus({ valid: false, message: "Verification failed." }) }
+                    finally { setVerifying(false) }
+                  }}
+                  disabled={verifying || get("gstin").length < 15}
+                  className="btn-secondary px-4 flex-shrink-0">
+                  {verifying ? <Loader2 size={14} className="animate-spin" /> : <ShieldIcon size={14} />}
+                  {verifying ? "Checking…" : "Verify"}
+                </button>
+              </div>
+              {gstinStatus && (
+                <div className={`mt-2 flex items-center gap-2 text-xs px-3 py-2 rounded-lg
+                  ${gstinStatus.valid ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"}`}>
+                  {gstinStatus.valid ? <CheckCircle size={13} /> : <AlertCircle size={13} />}
+                  {gstinStatus.message}
+                </div>
+              )}
+              {get("state_name") && (
+                <p className="text-xs text-slate-500 mt-1">
+                  State: <strong>{get("state_name")}</strong>
+                  {get("state_code") && <span className="text-slate-400"> · Code {get("state_code")}</span>}
+                </p>
+              )}
+              <p className="text-xs text-slate-400 mt-1">
+                Leave blank if unregistered. You can add GSTIN at any time — GST features activate automatically.
+              </p>
+            </div>
+
+            {/* GST-specific fields — shown only when GSTIN is present */}
+            {get("gstin").length === 15 && (
+              <div className="space-y-4 pt-2 border-t border-slate-100">
+                <div>
+                  <label className="label">Legal Name <span className="text-slate-400 font-normal text-xs">(as per GST certificate)</span></label>
+                  <input value={get("legal_name")} onChange={e => set("legal_name", e.target.value)}
+                    placeholder="Registered business / proprietor name" className="input" />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="label">Trade Name <span className="text-slate-400 font-normal text-xs">(optional)</span></label>
+                    <input value={get("trade_name")} onChange={e => set("trade_name", e.target.value)}
+                      placeholder="Common name if different" className="input" />
+                  </div>
+                  <div>
+                    <label className="label">Registration Type</label>
+                    <select value={get("reg_type") || "Regular"} onChange={e => set("reg_type", e.target.value)} className="input">
+                      {REG_TYPES.map(r => <option key={r} value={r}>{r}</option>)}
+                    </select>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <button
+              onClick={async () => {
+                const gstin = get("gstin")
+                const gstEnabled = gstin.length === 15
+                set("gst_enabled", gstEnabled ? "true" : "false")
+                await saveSettings([
+                  "gstin","legal_name","trade_name","state_code","state_name","reg_type","gst_enabled"
+                ])
+                setGstEnabled(gstEnabled)
+              }}
+              disabled={saving}
+              className="btn-primary">
+              {saving ? <><Spinner size="sm" />Saving…</> : <><Save size={16} />Save GST Settings</>}
+            </button>
+          </div>
         </div>
       )}
 
@@ -312,6 +440,8 @@ export default function SettingsPage() {
       {activeTab === "license" && <LicensePanel />}
       {activeTab === "gst_compliance" && <GstComplianceTab />}
 
+      {activeTab === "sms" && <SmsSettingsTab />}
+
       {activeTab === "users" && (
         <UserManagement adminId={uid} />
       )}
@@ -334,6 +464,114 @@ export default function SettingsPage() {
           <p className="text-sm text-slate-500">To change your password or update your profile, contact your system administrator.</p>
         </div>
       )}
+    </div>
+  )
+}
+
+function SmsSettingsTab() {
+  const { user } = useAuthStore()
+  const uid = user?.id ?? 1
+
+  const [apiKey,   setApiKey]   = useState("")
+  const [senderId, setSenderId] = useState("")
+  const [enabled,  setEnabled]  = useState(false)
+  const [testPhone,setTestPhone] = useState("")
+  const [testMsg,  setTestMsg]  = useState("Hello from PharmaCare Pro! This is a test SMS.")
+  const [loading,  setLoading]  = useState(true)
+  const [saving,   setSaving]   = useState(false)
+  const [testing,  setTesting]  = useState(false)
+
+  useEffect(() => {
+    invoke<{ sms_api_key: string; sms_sender_id: string; sms_enabled: boolean }>("sms_settings_get")
+      .then(r => {
+        setApiKey(r.sms_api_key ?? "")
+        setSenderId(r.sms_sender_id ?? "")
+        setEnabled(r.sms_enabled ?? false)
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [])
+
+  const handleSave = async () => {
+    setSaving(true)
+    try {
+      await invoke("sms_settings_save", { apiKey, senderId, enabled, userId: uid })
+      toast.success("SMS settings saved.")
+    } catch (e: unknown) { toast.error(e instanceof Error ? e.message : "Could not save.") }
+    finally { setSaving(false) }
+  }
+
+  const handleTest = async () => {
+    if (!testPhone.trim()) { toast.error("Enter a phone number for test."); return }
+    setTesting(true)
+    try {
+      await invoke("sms_send", { phone: testPhone, message: testMsg })
+      toast.success("Test SMS sent! Check your phone.")
+    } catch (e: unknown) { toast.error(e instanceof Error ? e.message : "SMS failed.") }
+    finally { setTesting(false) }
+  }
+
+  if (loading) return <div className="flex items-center justify-center h-32"><Spinner size="lg"/></div>
+
+  return (
+    <div className="space-y-4">
+      <div className="card p-6 space-y-5">
+        <div>
+          <h2 className="font-semibold text-slate-800 flex items-center gap-2"><MessageSquare size={16}/>SMS Configuration</h2>
+          <p className="text-sm text-slate-500 mt-0.5">
+            PharmaCare Pro uses <a href="https://www.fast2sms.com" target="_blank" rel="noreferrer" className="text-blue-600 underline underline-offset-2">Fast2SMS</a> for sending SMS.
+            Create a free account and paste your API key below.
+          </p>
+        </div>
+
+        <div className="flex items-center justify-between p-3 bg-slate-50 rounded-xl">
+          <div>
+            <p className="text-sm font-semibold text-slate-800">Enable SMS</p>
+            <p className="text-xs text-slate-500 mt-0.5">Turn on to allow sending due-reminders, bill summaries and alerts.</p>
+          </div>
+          <button onClick={() => setEnabled(v => !v)}
+            className={`w-12 h-6 rounded-full transition-colors ${enabled ? "bg-blue-600" : "bg-slate-300"} relative`}>
+            <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${enabled ? "translate-x-6" : "translate-x-0.5"}`}/>
+          </button>
+        </div>
+
+        <div>
+          <label className="label">Fast2SMS API Key</label>
+          <input type="password" value={apiKey} onChange={e => setApiKey(e.target.value)}
+            placeholder="Paste your Fast2SMS API key here" className="input font-mono text-sm" />
+          <p className="text-xs text-slate-400 mt-1">Get it from: Fast2SMS → Dev API → API Key</p>
+        </div>
+
+        <div>
+          <label className="label">Sender ID <span className="text-slate-400 text-xs font-normal">(optional)</span></label>
+          <input value={senderId} onChange={e => setSenderId(e.target.value)}
+            placeholder="e.g. PHARMA" className="input" maxLength={11} />
+        </div>
+
+        <button onClick={handleSave} disabled={saving} className="btn-primary">
+          {saving ? <><Spinner size="sm"/>Saving…</> : <><Save size={15}/>Save SMS Settings</>}
+        </button>
+      </div>
+
+      {/* Test SMS */}
+      <div className="card p-6 space-y-4">
+        <h3 className="font-semibold text-slate-800 flex items-center gap-2"><Send size={15}/>Send Test SMS</h3>
+        <div>
+          <label className="label">Test Mobile Number</label>
+          <input value={testPhone} onChange={e => setTestPhone(e.target.value)}
+            placeholder="10-digit mobile" className="input" maxLength={13} />
+        </div>
+        <div>
+          <label className="label">Test Message</label>
+          <textarea value={testMsg} onChange={e => setTestMsg(e.target.value)}
+            rows={2} className="input resize-none text-sm"/>
+        </div>
+        <button onClick={handleTest} disabled={testing || !enabled}
+          className="btn-secondary disabled:opacity-50">
+          {testing ? <><Spinner size="sm"/>Sending…</> : <><Send size={14}/>Send Test SMS</>}
+        </button>
+        {!enabled && <p className="text-xs text-amber-600">⚠ Enable SMS above before testing.</p>}
+      </div>
     </div>
   )
 }

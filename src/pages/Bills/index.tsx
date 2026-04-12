@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect } from "react"
-import { Receipt, Search, X, Printer, RotateCcw, RefreshCw } from "lucide-react"
+import { invoke } from "@tauri-apps/api/core"
+import { Receipt, Search, X, Printer, RotateCcw, RefreshCw, FilePen, MessageCircle } from "lucide-react"
 import toast from "react-hot-toast"
 import { billingService } from "@/services/billingService"
 import { printerService } from "@/services/printerService"
@@ -163,6 +164,15 @@ export default function BillsPage() {
             onPrint={() => printBill(selectedBill.id)}
             onCancel={() => { setCancelTarget(selectedBill); setCancelReason("") }}
             onReturn={() => setShowReturnForm(true)}
+            onAmend={async () => {
+              const reason = window.prompt("Amendment reason:")
+              if (!reason) return
+              try {
+                await invoke('billing_create_amendment', { billId: selectedBill.id, reason, userId: uid })
+                toast.success("Bill marked as amended.")
+                load(page)
+              } catch (e: unknown) { toast.error(e instanceof Error ? e.message : String(e)) }
+            }}
           />
         )}
       </div>
@@ -192,9 +202,29 @@ export default function BillsPage() {
   )
 }
 
-function BillDetail({ bill, printing, onPrint, onCancel, onReturn }: {
+function shareOnWhatsApp(bill: IBill) {
+  const items = (bill.items ?? []) as IBillItem[]
+  const itemLines = items.slice(0, 5).map(i => `  • ${i.medicine_name} x${i.quantity} — ₹${i.total_amount.toFixed(2)}`).join("\n")
+  const moreItems = items.length > 5 ? `  ...and ${items.length - 5} more items\n` : ""
+  const msg = [
+    `🧾 *PharmaCare Bill — ${bill.bill_number}*`,
+    `📅 Date: ${new Date(bill.bill_date).toLocaleDateString("en-IN", { day:"numeric", month:"short", year:"numeric" })}`,
+    bill.customer_name ? `👤 Patient: ${bill.customer_name}` : "",
+    ``,
+    `*Items:*`,
+    itemLines,
+    moreItems,
+    `*Total: ₹${bill.net_amount.toFixed(2)}*`,
+    bill.outstanding > 0 ? `⚠ Outstanding: ₹${bill.outstanding.toFixed(2)}` : "",
+    ``,
+    `Thank you for choosing our pharmacy! 🙏`,
+  ].filter(Boolean).join("\n")
+  window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, "_blank")
+}
+
+function BillDetail({ bill, printing, onPrint, onCancel, onReturn, onAmend }: {
   bill: IBill; printing: boolean;
-  onPrint: () => void; onCancel: () => void; onReturn: () => void
+  onPrint: () => void; onCancel: () => void; onReturn: () => void; onAmend: () => void
 }) {
   const items = (bill.items ?? []) as IBillItem[]
   const payments = (bill.payments ?? []) as { amount:number; payment_mode:string; reference_no?:string; payment_date:string }[]
@@ -215,15 +245,25 @@ function BillDetail({ bill, printing, onPrint, onCancel, onReturn }: {
               <button onClick={onPrint} disabled={printing} className="btn-ghost text-xs py-1.5">
                 {printing ? <Spinner size="sm"/> : <><Printer size={13}/>Print</>}
               </button>
+              <button onClick={() => shareOnWhatsApp(bill)}
+                className="btn-ghost text-xs py-1.5 text-green-700 hover:bg-green-50">
+                <MessageCircle size={13}/>WhatsApp
+              </button>
               {bill.status === "active" && (
                 <>
                   <button onClick={onReturn} className="btn-ghost text-xs py-1.5 text-amber-600 hover:bg-amber-50">
                     <RotateCcw size={13}/>Return
                   </button>
+                  <button onClick={onAmend} className="btn-ghost text-xs py-1.5 text-amber-600 hover:bg-amber-50">
+                    <FilePen size={13}/>Amend
+                  </button>
                   <button onClick={onCancel} className="btn-ghost text-xs py-1.5 text-red-600 hover:bg-red-50">
                     <X size={13}/>Cancel
                   </button>
                 </>
+              )}
+              {bill.status === "amended" && (
+                <span className="text-xs text-amber-500 font-medium px-2 py-1 bg-amber-50 rounded-lg">Amended</span>
               )}
             </div>
           </div>

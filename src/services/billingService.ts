@@ -5,6 +5,7 @@ export interface CreateBillInput {
   customer_id?: number; doctor_id?: number; items: ICartItem[]
   payments: { amount: number; payment_mode: string; reference_no?: string }[]
   discount_amount?: number; notes?: string; created_by: number
+  loyalty_points_redeemed?: number
 }
 
 export const billingService = {

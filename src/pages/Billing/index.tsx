@@ -6,6 +6,7 @@ import{useAuthStore}from"@/store/authStore"
 import{billingService}from"@/services/billingService"
 import{medicineService}from"@/services/medicineService"
 import{customerService}from"@/services/customerService"
+import{schemeService,Scheme}from"@/services/schemeService"
 import{formatCurrency}from"@/utils/currency"
 import{isNearExpiry,formatDate}from"@/utils/date"
 import{useKeyboard}from"@/hooks/useKeyboard"
@@ -36,11 +37,25 @@ export default function BillingPage(){
   }
   const[showCustomer,setShowCustomer]=useState(false)
   const[saving,setSaving]=useState(false)
+  const[loyaltyRedeem,setLoyaltyRedeem]=useState(0)
+  const[applicableSchemes,setApplicableSchemes]=useState<Scheme[]>([])
+  const[selectedScheme,setSelectedScheme]=useState<Scheme|null>(null)
+  const schemeDiscount=selectedScheme
+    ?(selectedScheme.scheme_type==="percent"?Math.round(totals.net_amount*selectedScheme.value/100)
+    :selectedScheme.scheme_type==="flat"?selectedScheme.value:0):0
   const debouncedQ=useDebounce(searchQ,200)
 
   useEffect(()=>{searchRef.current?.focus()},[])
   useKeyboard("F7",()=>{if(items.length>0)setShowPayment(true)})
   useKeyboard("F4",async()=>{if(items.length===0)return;await billingService.holdBill({label:`Held ${new Date().toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"})}`,items,created_by:uid});clear();toast.success("Bill held. Press F5 to recall.")})
+
+  // Fetch applicable schemes when cart total changes
+  useEffect(()=>{
+    if(items.length===0){setApplicableSchemes([]);setSelectedScheme(null);return}
+    schemeService.getApplicable(totals.net_amount)
+      .then(r=>{setApplicableSchemes((r as any).schemes??[])})
+      .catch(()=>{})
+  },[items.length,totals.net_amount])
 
   // Search medicines
   useEffect(()=>{
@@ -102,8 +117,8 @@ export default function BillingPage(){
   const handleSaveBill=async(payments:{amount:number;payment_mode:PaymentMode;reference_no?:string}[])=>{
     setSaving(true)
     try{
-      const id=await billingService.createBill({customer_id:customer?.id,items,payments,discount_amount:totals.bill_discount,created_by:uid})
-      clear();setShowPayment(false)
+      const id=await billingService.createBill({customer_id:customer?.id,items,payments,discount_amount:totals.bill_discount+schemeDiscount,created_by:uid,loyalty_points_redeemed:loyaltyRedeem>0?loyaltyRedeem:undefined})
+      clear();setShowPayment(false);setLoyaltyRedeem(0);setSelectedScheme(null)
       toast.success("Bill saved successfully!")
       // Auto-print receipt
       try{
@@ -248,6 +263,43 @@ export default function BillingPage(){
                 <p>Subtotal: ₹{totals.subtotal.toFixed(2)} · GST: ₹{totals.total_gst.toFixed(2)}</p>
                 {totals.item_discount>0&&<p className="text-green-600">Disc: -₹{totals.item_discount.toFixed(2)}</p>}
                 {totals.round_off!==0&&<p className="text-slate-400">Round off: ₹{totals.round_off.toFixed(2)}</p>}
+                {customer&&(customer.loyalty_points??0)>0&&(
+                  <div className="flex items-center gap-2 pt-1">
+                    <span className="text-green-600 font-medium">{customer.loyalty_points} pts available</span>
+                    <input
+                      type="number" min={0} max={customer.loyalty_points??0}
+                      value={loyaltyRedeem||""}
+                      onChange={e=>{const v=Math.min(Number(e.target.value),customer.loyalty_points??0);setLoyaltyRedeem(v)}}
+                      placeholder="Redeem pts"
+                      className="w-24 border border-slate-200 rounded text-sm py-0.5 px-2 outline-none focus:ring-1 focus:ring-green-500"
+                    />
+                    {loyaltyRedeem>0&&<span className="text-green-600">-₹{loyaltyRedeem}</span>}
+                  </div>
+                )}
+                {applicableSchemes.length>0&&(
+                  <div className="pt-1">
+                    <p className="text-xs text-slate-400 mb-1">Applicable Schemes:</p>
+                    <div className="flex flex-wrap gap-1">
+                      {applicableSchemes.map(s=>(
+                        <button key={s.id}
+                          onClick={()=>setSelectedScheme(selectedScheme?.id===s.id?null:s)}
+                          className={`text-xs px-2.5 py-1 rounded-full border transition-colors font-medium ${
+                            selectedScheme?.id===s.id
+                              ?"bg-blue-600 text-white border-blue-600"
+                              :"bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100"
+                          }`}>
+                          🏷 {s.name}{s.scheme_type==="percent"?` (${s.value}% off)`:s.scheme_type==="flat"?` (₹${s.value} off)`:` (Buy ${s.buy_quantity} Get ${s.get_quantity})`}
+                        </button>
+                      ))}
+                    </div>
+                    {selectedScheme&&schemeDiscount>0&&(
+                      <p className="text-xs text-blue-600 font-semibold mt-1">Scheme discount: -₹{schemeDiscount}</p>
+                    )}
+                    {selectedScheme&&selectedScheme.scheme_type==="bxgy"&&(
+                      <p className="text-xs text-blue-600 font-semibold mt-1">BxGy scheme applied — update quantities manually</p>
+                    )}
+                  </div>
+                )}
               </div>
               <div className="flex items-center gap-4">
                 <div className="text-right">

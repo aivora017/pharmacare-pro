@@ -1,6 +1,8 @@
 import{useState,useEffect,useRef}from"react"
 import{useNavigate}from"react-router-dom"
-import{Eye,EyeOff,Pill,ArrowRight}from"lucide-react"
+import{Eye,EyeOff,Pill,ArrowRight,Settings2}from"lucide-react"
+import{invoke}from"@tauri-apps/api/core"
+import toast from"react-hot-toast"
 import{useAuthStore}from"@/store/authStore"
 
 export default function AuthPage(){
@@ -12,6 +14,23 @@ export default function AuthPage(){
   const[showPwd,setShowPwd]=useState(false)
   const[loading,setLoading]=useState(false)
   const[error,setError]=useState("")
+
+  // Hidden tech setup entry
+  const[showTechPrompt,setShowTechPrompt]=useState(false)
+  const[techPwd,setTechPwd]=useState("")
+  const[techLoading,setTechLoading]=useState(false)
+
+  const handleTechUnlock=async(e:React.FormEvent)=>{
+    e.preventDefault()
+    if(!techPwd.trim())return
+    setTechLoading(true)
+    try{
+      const ok=await invoke<boolean>("tech_auth",{password:techPwd})
+      if(ok){navigate("/tech",{state:{authed:true}})}
+      else{toast.error("Incorrect technician password.")}
+    }catch(err:unknown){toast.error(err instanceof Error?err.message:"Auth failed.")}
+    finally{setTechLoading(false);setTechPwd("")}
+  }
 
   useEffect(()=>{if(isAuthenticated)navigate("/dashboard",{replace:true})},[isAuthenticated,navigate])
   useEffect(()=>{emailRef.current?.focus()},[])
@@ -55,7 +74,7 @@ export default function AuthPage(){
       </div>
 
       {/* Right login panel */}
-      <div className="flex-1 flex items-center justify-center p-6 bg-slate-50">
+      <div className="flex-1 flex items-center justify-center p-6 bg-slate-50 relative">
         <div className="w-full max-w-sm">
           <div className="flex items-center gap-3 mb-8 lg:hidden">
             <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center"><Pill size={20} className="text-white"/></div>
@@ -90,7 +109,37 @@ export default function AuthPage(){
           </div>
           <p className="text-center text-xs text-slate-400 mt-4">Forgot password? Contact your pharmacy administrator.</p>
         </div>
+
+        {/* Hidden tech entry — small gear icon, bottom-right, low contrast */}
+        <button onClick={()=>setShowTechPrompt(true)}
+          className="absolute bottom-4 right-4 p-2 text-slate-200 hover:text-slate-400 transition-colors opacity-30 hover:opacity-60 rounded-lg"
+          tabIndex={-1} title="">
+          <Settings2 size={14}/>
+        </button>
       </div>
+
+      {/* Tech password prompt */}
+      {showTechPrompt&&(
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 animate-fade-in">
+          <form onSubmit={handleTechUnlock}
+            className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-xs animate-slide-up">
+            <div className="flex items-center gap-2 mb-4">
+              <Settings2 size={16} className="text-slate-500"/>
+              <h3 className="font-semibold text-slate-800 text-sm">Technician Access</h3>
+            </div>
+            <input type="password" autoFocus value={techPwd} onChange={e=>setTechPwd(e.target.value)}
+              placeholder="Technician password" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 mb-4"/>
+            <div className="flex gap-2">
+              <button type="button" onClick={()=>{setShowTechPrompt(false);setTechPwd("")}}
+                className="flex-1 py-2 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">Cancel</button>
+              <button type="submit" disabled={techLoading||!techPwd.trim()}
+                className="flex-1 py-2 text-sm text-white bg-slate-800 rounded-lg hover:bg-slate-700 disabled:opacity-40">
+                {techLoading?"…":"Enter"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   )
 }

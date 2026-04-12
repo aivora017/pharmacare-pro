@@ -1,14 +1,66 @@
 import { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { TrendingUp, ShoppingCart, Pill, AlertTriangle, Users, ArrowRight, Plus, BarChart3 } from "lucide-react"
+import { TrendingUp, ShoppingCart, Pill, AlertTriangle, Users, ArrowRight, Plus, BarChart3, TrendingDown, DollarSign, Clock, PackageX, X } from "lucide-react"
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts"
 import toast from "react-hot-toast"
+import { invoke } from "@tauri-apps/api/core"
 import { useAuthStore } from "@/store/authStore"
 import { dashboardService } from "@/services/dashboardService"
 import { aiService } from "@/services/aiService"
+import { collectionService } from "@/services/collectionService"
 import { formatCompact, formatCurrency } from "@/utils/currency"
 import { Spinner } from "@/components/shared/Spinner"
 import { LicenceAlertBanner } from "./LicenceAlertBanner"
+
+interface ReorderItem { medicine_id: number; medicine_name: string; current_stock: number; reorder_level: number; unit: string }
+
+function ReorderAlertBanner() {
+  const navigate = useNavigate()
+  const [items,     setItems]     = useState<ReorderItem[]>([])
+  const [dismissed, setDismissed] = useState(false)
+
+  useEffect(() => {
+    invoke<ReorderItem[]>("reorder_alerts")
+      .then(r => setItems(r))
+      .catch(() => {})
+  }, [])
+
+  if (dismissed || items.length === 0) return null
+
+  const critical = items.filter(i => i.current_stock === 0)
+  const low      = items.filter(i => i.current_stock > 0)
+
+  return (
+    <div className="relative bg-orange-50 border border-orange-200 rounded-xl px-4 py-3">
+      <button onClick={() => setDismissed(true)}
+        className="absolute top-2 right-2 text-orange-400 hover:text-orange-600">
+        <X size={14}/>
+      </button>
+      <div className="flex items-start gap-3">
+        <PackageX size={18} className="text-orange-500 mt-0.5 shrink-0"/>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-orange-800">
+            {items.length} item{items.length !== 1 ? "s" : ""} need reordering
+            {critical.length > 0 && <span className="ml-2 text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded-full">{critical.length} out of stock</span>}
+          </p>
+          <div className="flex flex-wrap gap-1.5 mt-1.5">
+            {items.slice(0, 8).map(item => (
+              <span key={item.medicine_id}
+                className={`text-xs px-2 py-0.5 rounded-full ${item.current_stock === 0 ? "bg-red-100 text-red-700" : "bg-orange-100 text-orange-700"}`}>
+                {item.medicine_name} ({item.current_stock} {item.unit})
+              </span>
+            ))}
+            {items.length > 8 && <span className="text-xs text-orange-500">+{items.length - 8} more</span>}
+          </div>
+        </div>
+        <button onClick={() => navigate("/inventory")}
+          className="shrink-0 text-xs text-orange-700 font-medium hover:text-orange-900 flex items-center gap-1 mt-0.5">
+          View all <ArrowRight size={12}/>
+        </button>
+      </div>
+    </div>
+  )
+}
 
 interface Summary {
   today: { revenue: number; bill_count: number; avg_bill_value: number }
@@ -17,10 +69,19 @@ interface Summary {
   payment_split: { mode: string; amount: number }[]
 }
 
+interface ExtendedData {
+  today_pl: { revenue: number; cogs: number; gross_profit: number; expenses: number; net_profit: number; margin_pct: number }
+  cashier_sales: { name: string; bills: number; revenue: number }[]
+  expiry_buckets: { days_7: number; days_30: number; days_90: number }
+  monthly: { this_month: number; last_month: number; mom_change_pct: number }
+  top_medicines_today: { name: string; qty: number; revenue: number }[]
+}
+
 export default function DashboardPage() {
   const navigate  = useNavigate()
   const { user }  = useAuthStore()
   const [data,     setData]     = useState<Summary | null>(null)
+  const [extended, setExtended] = useState<ExtendedData | null>(null)
   const [loading,  setLoading]  = useState(true)
   const [briefing, setBriefing] = useState<{ priority: string; message: string; link?: string }[]>([])
 
@@ -29,6 +90,12 @@ export default function DashboardPage() {
       .then(d => setData(d as Summary))
       .catch(() => toast.error("Could not load dashboard."))
       .finally(() => setLoading(false))
+  }, [])
+
+  useEffect(() => {
+    collectionService.dashboardExtended()
+      .then(d => setExtended(d as ExtendedData))
+      .catch(() => { /* silent — may not have data yet */ })
   }, [])
 
   useEffect(() => {
@@ -59,6 +126,7 @@ export default function DashboardPage() {
   return (
     <div className="max-w-6xl mx-auto space-y-6 animate-fade-in">
       <LicenceAlertBanner />
+      <ReorderAlertBanner />
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -202,7 +270,7 @@ export default function DashboardPage() {
             </div>
           )}
           {alerts.outstanding_customers > 0 && (
-            <button onClick={() => navigate("/customers")}
+            <button onClick={() => navigate("/collections")}
               className="mt-4 w-full flex items-center justify-between px-3 py-2.5 bg-amber-50 border border-amber-200 rounded-lg text-amber-700 text-sm hover:bg-amber-100 transition-colors">
               <div className="flex items-center gap-2">
                 <Users size={14} />
@@ -213,6 +281,160 @@ export default function DashboardPage() {
           )}
         </div>
       </div>
+
+      {/* Extended KPIs — Sprint 9 */}
+      {extended && (
+        <>
+          {/* P&L + MoM row */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            {/* Today's P&L */}
+            <div className="card p-5 lg:col-span-2">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-semibold text-slate-800 flex items-center gap-2">
+                  <DollarSign size={16} className="text-green-600" /> Today's P&amp;L
+                </h3>
+                {extended.monthly.mom_change_pct !== 0 && (
+                  <span className={`flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-full
+                    ${extended.monthly.mom_change_pct >= 0
+                      ? "bg-green-100 text-green-700"
+                      : "bg-red-100 text-red-700"}`}>
+                    {extended.monthly.mom_change_pct >= 0
+                      ? <TrendingUp size={11} />
+                      : <TrendingDown size={11} />}
+                    {Math.abs(extended.monthly.mom_change_pct).toFixed(1)}% vs last month
+                  </span>
+                )}
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                {[
+                  { label: "Revenue",      value: extended.today_pl.revenue,      color: "text-slate-800" },
+                  { label: "COGS",         value: extended.today_pl.cogs,         color: "text-slate-500" },
+                  { label: "Gross Profit", value: extended.today_pl.gross_profit, color: "text-blue-600"  },
+                  { label: "Expenses",     value: extended.today_pl.expenses,     color: "text-amber-600" },
+                  { label: "Net Profit",   value: extended.today_pl.net_profit,   color: extended.today_pl.net_profit >= 0 ? "text-green-600" : "text-red-600" },
+                ].map(item => (
+                  <div key={item.label} className="text-center bg-slate-50 rounded-xl p-3">
+                    <p className="text-xs text-slate-500 mb-1">{item.label}</p>
+                    <p className={`text-sm font-bold ${item.color}`}>{formatCompact(item.value)}</p>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-3 flex items-center gap-2">
+                <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-green-500 rounded-full transition-all"
+                    style={{ width: `${Math.min(100, Math.max(0, extended.today_pl.margin_pct))}%` }}
+                  />
+                </div>
+                <span className="text-xs font-medium text-slate-600 whitespace-nowrap">
+                  {extended.today_pl.margin_pct.toFixed(1)}% margin
+                </span>
+              </div>
+            </div>
+
+            {/* Month comparison */}
+            <div className="card p-5">
+              <h3 className="font-semibold text-slate-800 mb-4">Month Revenue</h3>
+              <div className="space-y-3">
+                <div>
+                  <p className="text-xs text-slate-500 mb-1">This Month</p>
+                  <p className="text-2xl font-bold text-slate-900">{formatCompact(extended.monthly.this_month)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500 mb-1">Last Month</p>
+                  <p className="text-lg font-semibold text-slate-500">{formatCompact(extended.monthly.last_month)}</p>
+                </div>
+                {extended.monthly.last_month > 0 && (
+                  <div className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium
+                    ${extended.monthly.mom_change_pct >= 0
+                      ? "bg-green-50 text-green-700"
+                      : "bg-red-50 text-red-700"}`}>
+                    {extended.monthly.mom_change_pct >= 0
+                      ? <TrendingUp size={14} />
+                      : <TrendingDown size={14} />}
+                    {extended.monthly.mom_change_pct >= 0 ? "+" : ""}
+                    {extended.monthly.mom_change_pct.toFixed(1)}% MoM
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Cashier sales + Expiry buckets + Top medicines */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            {/* Cashier sales */}
+            <div className="card p-5">
+              <h3 className="font-semibold text-slate-800 mb-4 flex items-center gap-2">
+                <Users size={15} className="text-blue-500" /> Cashier Sales Today
+              </h3>
+              {extended.cashier_sales.length > 0 ? (
+                <div className="space-y-2">
+                  {extended.cashier_sales.map(cs => (
+                    <div key={cs.name} className="flex items-center justify-between px-3 py-2 bg-slate-50 rounded-lg">
+                      <div>
+                        <p className="text-sm font-medium text-slate-800">{cs.name}</p>
+                        <p className="text-xs text-slate-400">{cs.bills} bills</p>
+                      </div>
+                      <p className="text-sm font-bold text-blue-600">{formatCompact(cs.revenue)}</p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-slate-400 py-4 text-center">No sales recorded today.</p>
+              )}
+            </div>
+
+            {/* Expiry countdown buckets */}
+            <div className="card p-5">
+              <h3 className="font-semibold text-slate-800 mb-4 flex items-center gap-2">
+                <Clock size={15} className="text-amber-500" /> Expiry Watch
+              </h3>
+              <div className="space-y-2">
+                {[
+                  { label: "Expiring in 7 days",  count: extended.expiry_buckets.days_7,  color: "bg-red-50 text-red-700 border-red-100",    dot: "bg-red-500"    },
+                  { label: "Expiring in 30 days", count: extended.expiry_buckets.days_30, color: "bg-amber-50 text-amber-700 border-amber-100", dot: "bg-amber-500" },
+                  { label: "Expiring in 90 days", count: extended.expiry_buckets.days_90, color: "bg-yellow-50 text-yellow-700 border-yellow-100", dot: "bg-yellow-400" },
+                ].map(bucket => (
+                  <button key={bucket.label}
+                    onClick={() => navigate("/expiry")}
+                    className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg border text-sm transition-colors hover:opacity-80 ${bucket.color}`}>
+                    <div className="flex items-center gap-2">
+                      <div className={`w-2 h-2 rounded-full ${bucket.dot}`} />
+                      <span className="font-medium">{bucket.label}</span>
+                    </div>
+                    <span className="font-bold">{bucket.count} batches</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Top medicines today */}
+            <div className="card p-5">
+              <h3 className="font-semibold text-slate-800 mb-4 flex items-center gap-2">
+                <Pill size={15} className="text-purple-500" /> Top Medicines Today
+              </h3>
+              {extended.top_medicines_today.length > 0 ? (
+                <div className="space-y-2">
+                  {extended.top_medicines_today.slice(0, 5).map((m, i) => (
+                    <div key={m.name} className="flex items-center gap-3">
+                      <span className="w-5 h-5 rounded-full bg-slate-100 text-xs font-bold text-slate-500 flex items-center justify-center flex-shrink-0">
+                        {i + 1}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-slate-800 truncate">{m.name}</p>
+                        <p className="text-xs text-slate-400">{m.qty} units</p>
+                      </div>
+                      <p className="text-xs font-semibold text-slate-600 whitespace-nowrap">{formatCompact(m.revenue)}</p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-slate-400 py-4 text-center">No sales yet today.</p>
+              )}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   )
 }

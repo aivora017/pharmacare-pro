@@ -1,5 +1,5 @@
-import { useState, useCallback } from "react"
-import { BarChart3, ShoppingCart, Package, FileText, TrendingUp, ClipboardList, Download, RefreshCw } from "lucide-react"
+import { useState, useCallback, useEffect } from "react"
+import { BarChart3, ShoppingCart, Package, FileText, TrendingUp, ClipboardList, Download, RefreshCw, AlertOctagon } from "lucide-react"
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from "recharts"
 import toast from "react-hot-toast"
 import { reportService } from "@/services/reportService"
@@ -11,15 +11,16 @@ import { PageHeader } from "@/components/shared/PageHeader"
 import { EmptyState } from "@/components/shared/EmptyState"
 import { Spinner } from "@/components/shared/Spinner"
 
-type Tab = "sales" | "purchase" | "stock" | "gst" | "pl" | "audit"
+type Tab = "sales" | "purchase" | "stock" | "gst" | "pl" | "audit" | "dead_stock"
 
 const TABS: { id: Tab; label: string; icon: React.ComponentType<{size:number}> }[] = [
-  { id:"sales",    label:"Sales",          icon:TrendingUp    },
-  { id:"purchase", label:"Purchase",       icon:ShoppingCart  },
-  { id:"stock",    label:"Stock Value",    icon:Package       },
-  { id:"gst",      label:"GST / Tax",      icon:FileText      },
-  { id:"pl",       label:"Profit & Loss",  icon:BarChart3     },
-  { id:"audit",    label:"Audit Log",      icon:ClipboardList },
+  { id:"sales",      label:"Sales",          icon:TrendingUp    },
+  { id:"purchase",   label:"Purchase",       icon:ShoppingCart  },
+  { id:"stock",      label:"Stock Value",    icon:Package       },
+  { id:"gst",        label:"GST / Tax",      icon:FileText      },
+  { id:"pl",         label:"Profit & Loss",  icon:BarChart3     },
+  { id:"audit",      label:"Audit Log",      icon:ClipboardList },
+  { id:"dead_stock", label:"Dead Stock",     icon:AlertOctagon  },
 ]
 
 const PIE_COLORS = ["#2563eb","#16a34a","#d97706","#dc2626","#7c3aed","#0891b2"]
@@ -80,12 +81,13 @@ export default function ReportsPage() {
         ))}
       </div>
 
-      {tab==="sales"    && <SalesReport defaultFrom={monthStart} defaultTo={today}/>}
-      {tab==="purchase" && <PurchaseReport defaultFrom={monthStart} defaultTo={today}/>}
-      {tab==="stock"    && <StockReport/>}
-      {tab==="gst"      && <GstReport defaultFrom={monthStart} defaultTo={today}/>}
-      {tab==="pl"       && <ProfitLossReport defaultFrom={monthStart} defaultTo={today}/>}
-      {tab==="audit"    && <AuditReport defaultFrom={monthStart} defaultTo={today}/>}
+      {tab==="sales"      && <SalesReport defaultFrom={monthStart} defaultTo={today}/>}
+      {tab==="purchase"   && <PurchaseReport defaultFrom={monthStart} defaultTo={today}/>}
+      {tab==="stock"      && <StockReport/>}
+      {tab==="gst"        && <GstReport defaultFrom={monthStart} defaultTo={today}/>}
+      {tab==="pl"         && <ProfitLossReport defaultFrom={monthStart} defaultTo={today}/>}
+      {tab==="audit"      && <AuditReport defaultFrom={monthStart} defaultTo={today}/>}
+      {tab==="dead_stock" && <DeadStockTab/>}
     </div>
   )
 }
@@ -294,36 +296,132 @@ function GstReport({ defaultFrom, defaultTo }: { defaultFrom:string;defaultTo:st
   )
 }
 
-function ProfitLossReport({ defaultFrom, defaultTo }: { defaultFrom:string;defaultTo:string }) {
-  const[from,setFrom]=useState(defaultFrom);const[to,setTo]=useState(defaultTo);const[data,setData]=useState<Record<string,unknown>|null>(null);const[loading,setLoading]=useState(false)
-  const load=useCallback(async()=>{if(!from||!to){toast.error("Select date range.");return};setLoading(true);try{setData(await reportService.profitLoss(from,to) as Record<string,unknown>)}catch(e:unknown){toast.error(e instanceof Error?e.message:"Error")}finally{setLoading(false)}},[from,to])
-  const s=data?.summary as Record<string,unknown>|undefined;const daily=(data?.daily as unknown[])??[]
-  return(
-    <div className="space-y-4">
-      <DateRange from={from} to={to} onFrom={setFrom} onTo={setTo} onLoad={load} loading={loading}/>
-      {!data&&!loading&&<EmptyState icon={<TrendingUp size={40}/>} title="Select date range and load P&L report"/>}
-      {loading&&<div className="flex justify-center py-16"><Spinner size="lg"/></div>}
-      {data&&s&&(
+const MONTHS_SHORT = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
+
+function ProfitLossReport({ defaultFrom: _df, defaultTo: _dt }: { defaultFrom:string;defaultTo:string }) {
+  const now = new Date()
+  const [period, setPeriod] = useState<"monthly"|"yearly">("monthly")
+  const [year, setYear]   = useState(now.getFullYear())
+  const [month, setMonth] = useState(now.getMonth() + 1)
+  const [data, setData]   = useState<Record<string,unknown>|null>(null)
+  const [loading, setLoading] = useState(false)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const res = await invoke<Record<string,unknown>>("pl_report", {
+        period, year, month: period === "monthly" ? month : null
+      })
+      setData(res)
+    } catch (e: unknown) { toast.error(e instanceof Error ? e.message : "Error") }
+    finally { setLoading(false) }
+  }, [period, year, month])
+
+  useEffect(() => { load() }, [load])
+
+  const d = data ?? {}
+  const revenue      = (d.revenue      as number) ?? 0
+  const cogs         = (d.cogs         as number) ?? 0
+  const grossProfit  = (d.gross_profit as number) ?? 0
+  const grossMargin  = (d.gross_margin_pct as number) ?? 0
+  const expenses     = (d.expenses     as number) ?? 0
+  const netProfit    = (d.net_profit   as number) ?? 0
+  const netMargin    = (d.net_margin_pct as number) ?? 0
+  const billCount    = (d.bill_count   as number) ?? 0
+  const expBreakdown = (d.expense_breakdown as Record<string,unknown>[]) ?? []
+  const monthlyBreak = (d.monthly_breakdown as Record<string,unknown>[]) ?? []
+
+  const years = Array.from({length:6},(_,i) => now.getFullYear()-i)
+
+  return (
+    <div className="space-y-5">
+      {/* Controls */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex rounded-lg overflow-hidden border border-slate-200">
+          {(["monthly","yearly"] as const).map(p=>(
+            <button key={p} onClick={()=>setPeriod(p)}
+              className={`px-4 py-1.5 text-sm font-medium transition-colors ${period===p?"bg-blue-600 text-white":"text-slate-600 hover:bg-slate-50"}`}>
+              {p==="monthly"?"Monthly":"Yearly"}
+            </button>
+          ))}
+        </div>
+        <select value={year} onChange={e=>setYear(Number(e.target.value))} className="input py-1.5 text-sm w-28">
+          {years.map(y=><option key={y} value={y}>{y}</option>)}
+        </select>
+        {period==="monthly" && (
+          <select value={month} onChange={e=>setMonth(Number(e.target.value))} className="input py-1.5 text-sm w-28">
+            {MONTHS_SHORT.map((m,i)=><option key={i} value={i+1}>{m}</option>)}
+          </select>
+        )}
+        <button onClick={load} disabled={loading} className="btn-primary text-xs px-4 py-2">
+          {loading?<><Spinner size="sm"/>Loading…</>:<><RefreshCw size={13}/>Refresh</>}
+        </button>
+      </div>
+
+      {loading && <div className="flex justify-center py-16"><Spinner size="lg"/></div>}
+
+      {!loading && data && (
         <>
+          {/* KPI cards */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <SummaryCard label="Revenue" value={formatCompact(s.revenue as number)} color="green"/>
-            <SummaryCard label="Est. COGS" value={formatCompact(s.cogs as number)} color="amber"/>
-            <SummaryCard label="Gross Profit" value={formatCompact(s.gross_profit as number)} color={(s.gross_profit as number)>=0?"green":"red"}/>
-            <SummaryCard label="Gross Margin" value={`${(s.gross_margin_pct as number).toFixed(1)}%`} color={(s.gross_margin_pct as number)>=20?"green":"amber"}/>
+            <SummaryCard label="Revenue"       value={formatCompact(revenue)}     sub={`${billCount} bills`}                color="green"/>
+            <SummaryCard label="COGS"          value={formatCompact(cogs)}         sub="purchase cost"                       color="amber"/>
+            <SummaryCard label="Gross Profit"  value={formatCompact(grossProfit)}  sub={`${grossMargin.toFixed(1)}% margin`} color={grossProfit>=0?"green":"red"}/>
+            <SummaryCard label="Net Profit"    value={formatCompact(netProfit)}    sub={`${netMargin.toFixed(1)}% net margin`} color={netProfit>=0?"green":"red"}/>
           </div>
-          {daily.length>0&&(
+
+          {/* P&L waterfall summary */}
+          <div className="card p-5">
+            <h3 className="font-semibold text-slate-800 mb-4">P&amp;L Statement</h3>
+            <div className="space-y-2 text-sm">
+              {[
+                { label:"Revenue (Net Sales)",  value: revenue,     style:"font-semibold text-slate-900" },
+                { label:"Cost of Goods Sold",   value:-cogs,        style:"text-amber-700" },
+                { label:"Gross Profit",         value: grossProfit, style:"font-semibold text-blue-700 border-t border-slate-200 pt-2 mt-2" },
+                { label:"Operating Expenses",   value:-expenses,    style:"text-red-600" },
+                { label:"Net Profit",           value: netProfit,   style:`font-bold text-lg border-t-2 border-slate-300 pt-2 mt-2 ${netProfit>=0?"text-green-700":"text-red-700"}` },
+              ].map(row=>(
+                <div key={row.label} className={`flex justify-between ${row.style}`}>
+                  <span>{row.label}</span>
+                  <span>{formatCurrency(Math.abs(row.value))}{row.value<0&&row.label!=="Net Profit"?" (-)":""}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Expense breakdown */}
+          {expBreakdown.length > 0 && (
             <div className="card p-5">
-              <h3 className="font-semibold text-slate-800 mb-4">Daily Revenue vs COGS</h3>
-              <ResponsiveContainer width="100%" height={220}>
-                <LineChart data={daily as Record<string,unknown>[]}>
-                  <XAxis dataKey="date" tick={{fontSize:11,fill:"#94a3b8"}} tickFormatter={d=>{try{return new Date(d).toLocaleDateString("en-IN",{day:"numeric",month:"short"})}catch{return d}}}/>
-                  <YAxis tick={{fontSize:11,fill:"#94a3b8"}} tickFormatter={v=>formatCompact(v as number)} width={60}/>
+              <h3 className="font-semibold text-slate-800 mb-4">Expense Breakdown</h3>
+              <div className="space-y-2">
+                {expBreakdown.map((e,i)=>(
+                  <div key={i} className="flex items-center gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex justify-between text-sm mb-1">
+                        <span className="text-slate-700 capitalize">{e.category as string}</span>
+                        <span className="font-medium text-slate-900">{formatCurrency(e.amount as number)}</span>
+                      </div>
+                      <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                        <div className="h-full bg-red-400 rounded-full" style={{width:`${expenses>0?((e.amount as number)/expenses*100):0}%`}}/>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Monthly chart for yearly view */}
+          {period==="yearly" && monthlyBreak.length > 0 && (
+            <div className="card p-5">
+              <h3 className="font-semibold text-slate-800 mb-4">Monthly Revenue — FY {year}–{year+1}</h3>
+              <ResponsiveContainer width="100%" height={200}>
+                <BarChart data={monthlyBreak}>
+                  <XAxis dataKey="month" tick={{fontSize:11,fill:"#94a3b8"}} tickFormatter={m=>MONTHS_SHORT[(parseInt(m as string)-1)]}/>
+                  <YAxis tick={{fontSize:11,fill:"#94a3b8"}} tickFormatter={v=>formatCompact(v as number)} width={55}/>
                   <Tooltip formatter={(v:unknown)=>formatCurrency(v as number)} contentStyle={{fontSize:12,borderRadius:8}}/>
-                  <Legend/>
-                  <Line type="monotone" dataKey="revenue" stroke="#16a34a" strokeWidth={2} dot={false} name="Revenue"/>
-                  <Line type="monotone" dataKey="cogs" stroke="#d97706" strokeWidth={2} dot={false} name="COGS"/>
-                  <Line type="monotone" dataKey="gross_profit" stroke="#2563eb" strokeWidth={2} dot={false} name="Gross Profit" strokeDasharray="4 2"/>
-                </LineChart>
+                  <Bar dataKey="revenue" fill="#2563eb" radius={[3,3,0,0]} name="Revenue"/>
+                </BarChart>
               </ResponsiveContainer>
             </div>
           )}
@@ -333,34 +431,205 @@ function ProfitLossReport({ defaultFrom, defaultTo }: { defaultFrom:string;defau
   )
 }
 
-function AuditReport({ defaultFrom, defaultTo }: { defaultFrom:string;defaultTo:string }) {
-  const[from,setFrom]=useState(defaultFrom);const[to,setTo]=useState(defaultTo);const[data,setData]=useState<Record<string,unknown>|null>(null);const[loading,setLoading]=useState(false)
-  const load=useCallback(async()=>{if(!from||!to){toast.error("Select date range.");return};setLoading(true);try{setData(await reportService.auditLog(from,to) as Record<string,unknown>)}catch(e:unknown){toast.error(e instanceof Error?e.message:"Error")}finally{setLoading(false)}},[from,to])
-  const rows=(data?.rows as unknown[])??[]
-  const ACTION_COLOR: Record<string,string>={BILL_CREATED:"badge-green",MEDICINE_CREATED:"badge-blue",MEDICINE_UPDATED:"badge-blue",MEDICINE_DELETED:"badge-red",CUSTOMER_CREATED:"badge-blue",SUPPLIER_CREATED:"badge-blue",LOGIN:"badge-slate",BILL_CANCELLED:"badge-red",STOCK_ADJUSTED:"badge-amber",PURCHASE_BILL_CREATED:"badge-blue"}
-  return(
+const ACTION_COLOR: Record<string,string> = {
+  BILL_CREATED:"badge-green", BILL_CANCELLED:"badge-red",
+  MEDICINE_CREATED:"badge-blue", MEDICINE_UPDATED:"badge-blue", MEDICINE_DELETED:"badge-red",
+  CUSTOMER_CREATED:"badge-blue", SUPPLIER_CREATED:"badge-blue",
+  LOGIN:"badge-slate", LOGOUT:"badge-slate",
+  STOCK_ADJUSTED:"badge-amber", PURCHASE_BILL_CREATED:"badge-blue",
+  AMENDMENT:"badge-amber", EXPENSE_CREATED:"badge-blue",
+}
+
+const AUDIT_MODULES = ["","billing","medicine","customer","supplier","inventory","purchase","auth","expense","scheme"]
+
+function AuditReport({ defaultFrom: _df, defaultTo: _dt }: { defaultFrom:string;defaultTo:string }) {
+  const PAGE = 50
+  const [rows,   setRows]   = useState<Record<string,unknown>[]>([])
+  const [total,  setTotal]  = useState(0)
+  const [page,   setPage]   = useState(0)
+  const [mod,    setMod]    = useState("")
+  const [loading,setLoading]= useState(false)
+  const [loaded, setLoaded] = useState(false)
+
+  const load = useCallback(async (pg = 0, module = mod) => {
+    setLoading(true)
+    try {
+      const res = await invoke<{ rows: Record<string,unknown>[]; total: number; modules: string[] }>(
+        "audit_log_list",
+        { limit: PAGE, offset: pg * PAGE, module: module || null, userId: null }
+      )
+      setRows(res.rows)
+      setTotal(res.total)
+      setPage(pg)
+      setLoaded(true)
+    } catch(e: unknown) { toast.error(e instanceof Error ? e.message : "Failed to load audit log.") }
+    finally { setLoading(false) }
+  }, [mod])
+
+  // load on first render
+  useEffect(() => { load(0) }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const totalPages = Math.max(1, Math.ceil(total / PAGE))
+
+  const handleModChange = (val: string) => {
+    setMod(val)
+    load(0, val)
+  }
+
+  return (
     <div className="space-y-4">
-      <DateRange from={from} to={to} onFrom={setFrom} onTo={setTo} onLoad={load} loading={loading}/>
-      {!data&&!loading&&<EmptyState icon={<ClipboardList size={40}/>} title="Select date range to view audit log"/>}
-      {loading&&<div className="flex justify-center py-16"><Spinner size="lg"/></div>}
-      {data&&(
+      {/* Filters */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex items-center gap-2">
+          <label className="text-sm text-slate-600">Module</label>
+          <select value={mod} onChange={e=>handleModChange(e.target.value)}
+            className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 outline-none focus:ring-2 focus:ring-blue-500 capitalize">
+            {AUDIT_MODULES.map(m => (
+              <option key={m} value={m}>{m === "" ? "All modules" : m}</option>
+            ))}
+          </select>
+        </div>
+        <button onClick={()=>load(page)} disabled={loading}
+          className="btn-primary text-xs px-4 py-2">
+          {loading ? <><Spinner size="sm"/>Loading…</> : <><RefreshCw size={14}/>Refresh</>}
+        </button>
+        <span className="text-xs text-slate-400 ml-auto">{total} total events</span>
+      </div>
+
+      {!loaded && !loading && <EmptyState icon={<ClipboardList size={40}/>} title="Loading audit log…"/>}
+      {loading && <div className="flex justify-center py-16"><Spinner size="lg"/></div>}
+
+      {loaded && !loading && (
         <div className="card overflow-hidden">
-          <div className="p-4 border-b border-slate-200 flex items-center justify-between">
+          <div className="p-4 border-b border-slate-100 flex items-center justify-between">
             <h3 className="font-semibold text-slate-800">Audit Log</h3>
-            <span className="badge-slate">{data.total as number} events</span>
+            <span className="text-xs text-slate-500">Page {page+1} of {totalPages}</span>
           </div>
-          {rows.length===0?<EmptyState title="No events in this period"/>:(
-            <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-slate-50 sticky top-0"><tr className="text-xs text-slate-500 uppercase"><th className="text-left px-4 py-2">Time</th><th className="text-left px-4 py-2">User</th><th className="text-left px-4 py-2">Action</th><th className="text-left px-4 py-2">Module</th><th className="text-left px-4 py-2">Record</th></tr></thead>
-                <tbody>
-                  {(rows as Record<string,unknown>[]).map((r,i)=>(
-                    <tr key={i} className="table-row">
-                      <td className="px-4 py-2.5 text-xs text-slate-500 whitespace-nowrap">{formatDate(r.created_at as string)}</td>
-                      <td className="px-4 py-2.5 text-slate-700">{r.user_name as string}</td>
-                      <td className="px-4 py-2.5"><span className={ACTION_COLOR[r.action as string]??"badge-slate"}>{r.action as string}</span></td>
-                      <td className="px-4 py-2.5 text-slate-500 capitalize">{r.module as string}</td>
-                      <td className="px-4 py-2.5 text-xs font-mono text-slate-400">{r.record_id as string}</td>
+          {rows.length === 0
+            ? <EmptyState title="No events found" subtitle="Try a different module filter"/>
+            : (
+              <div className="overflow-x-auto max-h-[520px] overflow-y-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 sticky top-0">
+                    <tr className="text-xs text-slate-500 uppercase">
+                      <th className="text-left px-4 py-2.5">Time</th>
+                      <th className="text-left px-4 py-2.5">User</th>
+                      <th className="text-left px-4 py-2.5">Action</th>
+                      <th className="text-left px-4 py-2.5">Module</th>
+                      <th className="text-left px-4 py-2.5">Record</th>
+                      <th className="text-left px-4 py-2.5">Details</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((r, i) => (
+                      <tr key={i} className="table-row border-b border-slate-50 last:border-0 hover:bg-slate-50/50">
+                        <td className="px-4 py-2.5 text-xs text-slate-400 whitespace-nowrap">{formatDate(r.created_at as string)}</td>
+                        <td className="px-4 py-2.5 text-slate-700 font-medium">{r.user_name as string ?? "—"}</td>
+                        <td className="px-4 py-2.5">
+                          <span className={`${ACTION_COLOR[r.action as string] ?? "badge-slate"} text-[11px] px-2 py-0.5 rounded-full`}>
+                            {(r.action as string).replace(/_/g," ")}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2.5 text-slate-500 capitalize text-xs">{r.module as string}</td>
+                        <td className="px-4 py-2.5 text-xs font-mono text-slate-400">{r.record_id as string ?? "—"}</td>
+                        <td className="px-4 py-2.5 text-xs text-slate-400 max-w-[200px] truncate">{r.details as string ?? ""}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )
+          }
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div className="p-3 border-t border-slate-100 flex items-center justify-between">
+              <button onClick={()=>load(page-1)} disabled={page===0||loading}
+                className="btn-secondary text-xs px-3 py-1.5 disabled:opacity-40">← Prev</button>
+              <span className="text-xs text-slate-500">{page*PAGE+1}–{Math.min((page+1)*PAGE,total)} of {total}</span>
+              <button onClick={()=>load(page+1)} disabled={page>=totalPages-1||loading}
+                className="btn-secondary text-xs px-3 py-1.5 disabled:opacity-40">Next →</button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function DeadStockTab() {
+  const [data, setData] = useState<any>(null)
+  const [days, setDays] = useState(90)
+  const [loading, setLoading] = useState(false)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const result = await invoke<any>('reports_dead_stock', { days })
+      setData(result)
+    } catch (e: unknown) { toast.error(e instanceof Error ? e.message : String(e)) }
+    finally { setLoading(false) }
+  }, [days])
+
+  useEffect(() => { load() }, [load])
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-center gap-3">
+        <label className="text-sm font-medium text-slate-700">No sale in last</label>
+        <select value={days} onChange={e => { setDays(Number(e.target.value)) }} className="input w-28 py-1 text-sm">
+          <option value={30}>30 days</option>
+          <option value={60}>60 days</option>
+          <option value={90}>90 days</option>
+          <option value={180}>180 days</option>
+        </select>
+        <button onClick={load} disabled={loading} className="btn-secondary text-xs py-1.5 flex items-center gap-1.5">
+          <RefreshCw size={13} className={loading ? "animate-spin" : ""}/> Refresh
+        </button>
+      </div>
+      {loading && <div className="flex justify-center py-8"><Spinner size="lg" /></div>}
+      {data && (
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="card p-4">
+              <p className="text-xs text-slate-500">Dead Stock Items</p>
+              <p className="text-2xl font-bold text-slate-800">{data.count}</p>
+            </div>
+            <div className="card p-4">
+              <p className="text-xs text-slate-500">Total Value Locked</p>
+              <p className="text-2xl font-bold text-red-600">
+                ₹{data.total_value.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+              </p>
+            </div>
+          </div>
+          {data.dead_stock.length === 0 ? (
+            <EmptyState icon={<AlertOctagon size={40} className="text-slate-300"/>} message="No dead stock found for this period." />
+          ) : (
+            <div className="card overflow-hidden">
+              <table className="min-w-full text-sm">
+                <thead className="bg-slate-50 text-xs text-slate-500 uppercase">
+                  <tr>
+                    <th className="px-4 py-3 text-left">Medicine</th>
+                    <th className="px-4 py-3 text-left">Schedule</th>
+                    <th className="px-4 py-3 text-right">Stock</th>
+                    <th className="px-4 py-3 text-right">Value</th>
+                    <th className="px-4 py-3 text-left">Expiry</th>
+                    <th className="px-4 py-3 text-left">Last Sold</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {data.dead_stock.map((item: any) => (
+                    <tr key={item.id} className="hover:bg-slate-50">
+                      <td className="px-4 py-3">
+                        <p className="font-medium text-slate-800">{item.name}</p>
+                        <p className="text-xs text-slate-400">{item.generic_name}</p>
+                      </td>
+                      <td className="px-4 py-3 text-slate-600">{item.schedule}</td>
+                      <td className="px-4 py-3 text-right font-medium">{item.stock}</td>
+                      <td className="px-4 py-3 text-right text-red-600 font-medium">
+                        ₹{item.stock_value.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                      </td>
+                      <td className="px-4 py-3 text-slate-600">{item.latest_expiry}</td>
+                      <td className="px-4 py-3 text-slate-500">{item.last_sold_date}</td>
                     </tr>
                   ))}
                 </tbody>

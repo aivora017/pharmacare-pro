@@ -2629,7 +2629,9 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 name = "pharmacare-pro"
 version = "1.0.0"
 dependencies = [
+ "aes",
  "axum",
+ "base64 0.22.1",
  "bcrypt",
  "chrono",
  "local-ip-address",

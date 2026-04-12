@@ -3,12 +3,17 @@
 use crate::error::AppError;
 use bcrypt::{hash, verify, DEFAULT_COST};
 use rusqlite::{params, Connection, OptionalExtension};
+use serde_json::json;
 use std::path::PathBuf;
 use tauri::AppHandle;
 
 const M001: &str = include_str!("../../src/db/migrations/001_initial.sql");
 const M002: &str = include_str!("../../src/db/migrations/002_compliance.sql");
 const M003: &str = include_str!("../../src/db/migrations/003_sprint8.sql");
+const M004: &str = include_str!("../../src/db/migrations/004_sprint9.sql");
+const M005: &str = include_str!("../../src/db/migrations/005_sprint10.sql");
+const M006: &str = include_str!("../../src/db/migrations/006_sprint11.sql");
+const M007: &str = include_str!("../../src/db/migrations/007_sprint12.sql");
 
 pub struct Database { path: PathBuf }
 
@@ -46,6 +51,38 @@ impl Database {
         if done003.is_none() {
             c.execute_batch(M003)?;
             c.execute("INSERT INTO _migrations VALUES('003',datetime('now'))", [])?;
+        }
+        let done004: Option<String> = c.query_row("SELECT version FROM _migrations WHERE version='004'", [], |r| r.get(0)).optional()?;
+        if done004.is_none() {
+            c.execute_batch(M004)?;
+            c.execute("INSERT INTO _migrations VALUES('004',datetime('now'))", [])?;
+        }
+        let done005: Option<String> = c.query_row("SELECT version FROM _migrations WHERE version='005'", [], |r| r.get(0)).optional()?;
+        if done005.is_none() {
+            c.execute_batch(M005)?;
+            c.execute("INSERT INTO _migrations VALUES('005',datetime('now'))", [])?;
+        }
+        let done006: Option<String> = c.query_row("SELECT version FROM _migrations WHERE version='006'", [], |r| r.get(0)).optional()?;
+        if done006.is_none() {
+            c.execute_batch(M006)?;
+            c.execute("INSERT INTO _migrations VALUES('006',datetime('now'))", [])?;
+        }
+        let done007: Option<String> = c.query_row("SELECT version FROM _migrations WHERE version='007'", [], |r| r.get(0)).optional()?;
+        if done007.is_none() {
+            c.execute_batch(M007)?;
+            c.execute("INSERT INTO _migrations VALUES('007',datetime('now'))", [])?;
+        }
+        // Seed default tech password (PharmaTech#2024) — runs once on first install
+        let has_tech: Option<String> = c.query_row(
+            "SELECT value FROM settings WHERE key='tech_password_hash'", [], |r| r.get(0)
+        ).optional()?;
+        if has_tech.is_none() {
+            let hash = bcrypt::hash("PharmaTech#2024", 10)
+                .map_err(|e| AppError::Internal(e.to_string()))?;
+            c.execute(
+                "INSERT INTO settings(key,value,updated_at) VALUES('tech_password_hash',?1,datetime('now'))",
+                params![hash],
+            )?;
         }
         Ok(())
     }
@@ -2099,17 +2136,1301 @@ impl Database {
         Ok(())
     }
 
-    // ── SPRINT 7: ROLES LIST ──────────────────────────────────
+    // ── SPRINT 9: SCHEMES ────────────────────────────────────
 
-    pub fn list_roles(&self) -> Result<serde_json::Value, AppError> {
+    pub fn list_schemes(&self, active_only: bool) -> Result<serde_json::Value, AppError> {
         let c = self.open()?;
-        let mut s = c.prepare("SELECT id, name, permissions FROM roles ORDER BY id")?;
+        let mut s = c.prepare(
+            "SELECT s.id, s.name, s.scheme_type, s.value, s.buy_quantity, s.get_quantity,
+             s.medicine_id, COALESCE(m.name,'All Medicines') AS medicine_name,
+             s.min_bill_amount, s.start_date, s.end_date, s.is_active, s.notes, s.created_at
+             FROM schemes s
+             LEFT JOIN medicines m ON m.id = s.medicine_id
+             WHERE (?1=0 OR s.is_active=1)
+             ORDER BY s.is_active DESC, s.created_at DESC"
+        )?;
+        let rows: Vec<serde_json::Value> = s.query_map(params![active_only as i64], |r| Ok(serde_json::json!({
+            "id": r.get::<_,i64>(0)?,
+            "name": r.get::<_,String>(1)?,
+            "scheme_type": r.get::<_,String>(2)?,
+            "value": r.get::<_,f64>(3)?,
+            "buy_quantity": r.get::<_,i64>(4)?,
+            "get_quantity": r.get::<_,i64>(5)?,
+            "medicine_id": r.get::<_,Option<i64>>(6)?,
+            "medicine_name": r.get::<_,String>(7)?,
+            "min_bill_amount": r.get::<_,f64>(8)?,
+            "start_date": r.get::<_,Option<String>>(9)?,
+            "end_date": r.get::<_,Option<String>>(10)?,
+            "is_active": r.get::<_,i64>(11)? == 1,
+            "notes": r.get::<_,String>(12)?,
+            "created_at": r.get::<_,String>(13)?
+        })))?.collect::<Result<Vec<_>,_>>().map_err(|e| AppError::Database(e.to_string()))?;
+        let count = rows.len();
+        Ok(serde_json::json!({"schemes": rows, "count": count}))
+    }
+
+    pub fn create_scheme(&self, inp: &serde_json::Value, uid: i64) -> Result<i64, AppError> {
+        let c = self.open()?;
+        c.execute(
+            "INSERT INTO schemes(name,scheme_type,value,buy_quantity,get_quantity,medicine_id,min_bill_amount,start_date,end_date,is_active,notes,created_by)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
+            params![
+                inp["name"].as_str().ok_or(AppError::Validation("name required".into()))?,
+                inp["scheme_type"].as_str().unwrap_or("percent"),
+                inp["value"].as_f64().unwrap_or(0.0),
+                inp["buy_quantity"].as_i64().unwrap_or(0),
+                inp["get_quantity"].as_i64().unwrap_or(0),
+                inp["medicine_id"].as_i64(),
+                inp["min_bill_amount"].as_f64().unwrap_or(0.0),
+                inp["start_date"].as_str(),
+                inp["end_date"].as_str(),
+                inp["is_active"].as_bool().unwrap_or(true) as i64,
+                inp["notes"].as_str().unwrap_or(""),
+                uid
+            ]
+        )?;
+        Ok(c.last_insert_rowid())
+    }
+
+    pub fn update_scheme(&self, id: i64, inp: &serde_json::Value) -> Result<(), AppError> {
+        let c = self.open()?;
+        c.execute(
+            "UPDATE schemes SET name=?1,scheme_type=?2,value=?3,buy_quantity=?4,get_quantity=?5,
+             medicine_id=?6,min_bill_amount=?7,start_date=?8,end_date=?9,is_active=?10,notes=?11,
+             updated_at=datetime('now') WHERE id=?12",
+            params![
+                inp["name"].as_str().unwrap_or(""),
+                inp["scheme_type"].as_str().unwrap_or("percent"),
+                inp["value"].as_f64().unwrap_or(0.0),
+                inp["buy_quantity"].as_i64().unwrap_or(0),
+                inp["get_quantity"].as_i64().unwrap_or(0),
+                inp["medicine_id"].as_i64(),
+                inp["min_bill_amount"].as_f64().unwrap_or(0.0),
+                inp["start_date"].as_str(),
+                inp["end_date"].as_str(),
+                inp["is_active"].as_bool().unwrap_or(true) as i64,
+                inp["notes"].as_str().unwrap_or(""),
+                id
+            ]
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_scheme(&self, id: i64) -> Result<(), AppError> {
+        let c = self.open()?;
+        c.execute("DELETE FROM schemes WHERE id=?1", params![id])?;
+        Ok(())
+    }
+
+    pub fn get_applicable_schemes(&self, bill_total: f64) -> Result<serde_json::Value, AppError> {
+        let c = self.open()?;
+        let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+        let mut s = c.prepare(
+            "SELECT id, name, scheme_type, value, buy_quantity, get_quantity,
+             medicine_id, min_bill_amount, notes
+             FROM schemes
+             WHERE is_active=1
+             AND (start_date IS NULL OR start_date <= ?1)
+             AND (end_date IS NULL OR end_date >= ?1)
+             AND min_bill_amount <= ?2
+             ORDER BY value DESC"
+        )?;
+        let rows: Vec<serde_json::Value> = s.query_map(params![today, bill_total], |r| Ok(serde_json::json!({
+            "id": r.get::<_,i64>(0)?,
+            "name": r.get::<_,String>(1)?,
+            "scheme_type": r.get::<_,String>(2)?,
+            "value": r.get::<_,f64>(3)?,
+            "buy_quantity": r.get::<_,i64>(4)?,
+            "get_quantity": r.get::<_,i64>(5)?,
+            "medicine_id": r.get::<_,Option<i64>>(6)?,
+            "min_bill_amount": r.get::<_,f64>(7)?,
+            "notes": r.get::<_,String>(8)?
+        })))?.collect::<Result<Vec<_>,_>>().map_err(|e| AppError::Database(e.to_string()))?;
+        Ok(serde_json::json!({"schemes": rows}))
+    }
+
+    // ── SPRINT 9: COLLECTIONS ─────────────────────────────────
+
+    pub fn list_outstanding_customers(&self) -> Result<serde_json::Value, AppError> {
+        let c = self.open()?;
+        let mut s = c.prepare(
+            "SELECT c.id, c.name, c.phone, c.outstanding_balance,
+             MAX(b.bill_date) AS last_bill_date,
+             COUNT(DISTINCT b.id) AS pending_bills
+             FROM customers c
+             LEFT JOIN bills b ON b.customer_id = c.id AND b.outstanding > 0 AND b.status='active'
+             WHERE c.is_active=1 AND c.outstanding_balance > 0
+             GROUP BY c.id
+             ORDER BY c.outstanding_balance DESC"
+        )?;
         let rows: Vec<serde_json::Value> = s.query_map([], |r| Ok(serde_json::json!({
             "id": r.get::<_,i64>(0)?,
             "name": r.get::<_,String>(1)?,
-            "permissions": r.get::<_,String>(2)?
+            "phone": r.get::<_,Option<String>>(2)?,
+            "outstanding_balance": r.get::<_,f64>(3)?,
+            "last_bill_date": r.get::<_,Option<String>>(4)?,
+            "pending_bills": r.get::<_,i64>(5)?
         })))?.collect::<Result<Vec<_>,_>>().map_err(|e| AppError::Database(e.to_string()))?;
-        Ok(serde_json::json!({"roles": rows}))
+        let total: f64 = rows.iter().map(|r| r["outstanding_balance"].as_f64().unwrap_or(0.0)).sum();
+        let count = rows.len();
+        Ok(serde_json::json!({"customers": rows, "count": count, "total_outstanding": total}))
+    }
+
+    pub fn record_collection(&self, customer_id: i64, amount: f64, mode: &str,
+        ref_no: &str, notes: &str, uid: i64) -> Result<i64, AppError> {
+        let c = self.open()?;
+        // Validate customer exists and has dues
+        let bal: f64 = c.query_row(
+            "SELECT outstanding_balance FROM customers WHERE id=?1 AND is_active=1",
+            params![customer_id], |r| r.get(0)
+        ).optional()?.ok_or(AppError::Validation("Customer not found.".into()))?;
+        if amount <= 0.0 { return Err(AppError::Validation("Amount must be positive.".into())); }
+        if amount > bal + 0.01 {
+            return Err(AppError::Validation(format!("Customer outstanding is ₹{:.2}. Cannot collect ₹{:.2}.", bal, amount)));
+        }
+        let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+        c.execute(
+            "INSERT INTO collection_payments(customer_id,amount,payment_mode,payment_date,reference_no,notes,created_by)
+             VALUES(?1,?2,?3,?4,?5,?6,?7)",
+            params![customer_id, amount, mode, today, ref_no, notes, uid]
+        )?;
+        let coll_id = c.last_insert_rowid();
+        c.execute(
+            "UPDATE customers SET outstanding_balance = MAX(0, outstanding_balance - ?1), updated_at=datetime('now') WHERE id=?2",
+            params![amount, customer_id]
+        )?;
+        self.audit("collection_payment", "customers", &customer_id.to_string(),
+            None, Some(&format!("collected=₹{:.2},mode={}", amount, mode)), &uid.to_string())?;
+        Ok(coll_id)
+    }
+
+    pub fn get_collection_history(&self, customer_id: i64) -> Result<serde_json::Value, AppError> {
+        let c = self.open()?;
+        let mut s = c.prepare(
+            "SELECT cp.id, cp.amount, cp.payment_mode, cp.payment_date, cp.reference_no, cp.notes,
+             cp.created_at, u.name AS collected_by
+             FROM collection_payments cp
+             LEFT JOIN users u ON u.id = cp.created_by
+             WHERE cp.customer_id = ?1
+             ORDER BY cp.created_at DESC LIMIT 50"
+        )?;
+        let rows: Vec<serde_json::Value> = s.query_map(params![customer_id], |r| Ok(serde_json::json!({
+            "id": r.get::<_,i64>(0)?,
+            "amount": r.get::<_,f64>(1)?,
+            "payment_mode": r.get::<_,String>(2)?,
+            "payment_date": r.get::<_,String>(3)?,
+            "reference_no": r.get::<_,String>(4)?,
+            "notes": r.get::<_,String>(5)?,
+            "created_at": r.get::<_,String>(6)?,
+            "collected_by": r.get::<_,Option<String>>(7)?
+        })))?.collect::<Result<Vec<_>,_>>().map_err(|e| AppError::Database(e.to_string()))?;
+        let total: f64 = rows.iter().map(|r| r["amount"].as_f64().unwrap_or(0.0)).sum();
+        Ok(serde_json::json!({"history": rows, "total_collected": total}))
+    }
+
+    // ── SPRINT 9: ENHANCED DASHBOARD ─────────────────────────
+
+    pub fn dashboard_extended(&self) -> Result<serde_json::Value, AppError> {
+        let c = self.open()?;
+        let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+
+        // Today P&L
+        let today_revenue: f64 = c.query_row(
+            "SELECT COALESCE(SUM(net_amount),0) FROM bills WHERE status='active' AND date(bill_date)=date(?1)",
+            params![today], |r| r.get(0)
+        ).unwrap_or(0.0);
+        let today_cogs: f64 = c.query_row(
+            "SELECT COALESCE(SUM(bi.quantity * COALESCE(b.purchase_price,0)),0)
+             FROM bill_items bi
+             JOIN bills bl ON bl.id=bi.bill_id
+             JOIN batches b ON b.id=bi.batch_id
+             WHERE bl.status='active' AND date(bl.bill_date)=date(?1)",
+            params![today], |r| r.get(0)
+        ).unwrap_or(0.0);
+        let today_expenses: f64 = c.query_row(
+            "SELECT COALESCE(SUM(amount),0) FROM expenses WHERE date(expense_date)=date(?1)",
+            params![today], |r| r.get(0)
+        ).unwrap_or(0.0);
+        let today_gross = today_revenue - today_cogs;
+        let today_net = today_gross - today_expenses;
+
+        // Cashier-wise sales today
+        let mut cs = c.prepare(
+            "SELECT COALESCE(u.name,'Unknown') AS cashier, COUNT(b.id) AS bills,
+             COALESCE(SUM(b.net_amount),0) AS revenue
+             FROM bills b LEFT JOIN users u ON u.id=b.created_by
+             WHERE b.status='active' AND date(b.bill_date)=date(?1)
+             GROUP BY b.created_by ORDER BY revenue DESC"
+        )?;
+        let cashier_sales: Vec<serde_json::Value> = cs.query_map(params![today], |r| Ok(serde_json::json!({
+            "cashier": r.get::<_,String>(0)?,
+            "bills": r.get::<_,i64>(1)?,
+            "revenue": r.get::<_,f64>(2)?
+        })))?.collect::<Result<Vec<_>,_>>().map_err(|e| AppError::Database(e.to_string()))?;
+
+        // Expiry buckets (stock value at risk)
+        let exp7: i64 = c.query_row(
+            "SELECT COUNT(DISTINCT medicine_id) FROM batches WHERE is_active=1
+             AND (quantity_in-quantity_sold-quantity_adjusted)>0
+             AND date(expiry_date) BETWEEN date('now') AND date('now','+7 days')",
+            [], |r| r.get(0)
+        ).unwrap_or(0);
+        let exp30: i64 = c.query_row(
+            "SELECT COUNT(DISTINCT medicine_id) FROM batches WHERE is_active=1
+             AND (quantity_in-quantity_sold-quantity_adjusted)>0
+             AND date(expiry_date) BETWEEN date('now','+8 days') AND date('now','+30 days')",
+            [], |r| r.get(0)
+        ).unwrap_or(0);
+        let exp90: i64 = c.query_row(
+            "SELECT COUNT(DISTINCT medicine_id) FROM batches WHERE is_active=1
+             AND (quantity_in-quantity_sold-quantity_adjusted)>0
+             AND date(expiry_date) BETWEEN date('now','+31 days') AND date('now','+90 days')",
+            [], |r| r.get(0)
+        ).unwrap_or(0);
+
+        // Month-over-month comparison
+        let this_month_rev: f64 = c.query_row(
+            "SELECT COALESCE(SUM(net_amount),0) FROM bills WHERE status='active'
+             AND strftime('%Y-%m',bill_date)=strftime('%Y-%m','now')",
+            [], |r| r.get(0)
+        ).unwrap_or(0.0);
+        let last_month_rev: f64 = c.query_row(
+            "SELECT COALESCE(SUM(net_amount),0) FROM bills WHERE status='active'
+             AND strftime('%Y-%m',bill_date)=strftime('%Y-%m','now','-1 month')",
+            [], |r| r.get(0)
+        ).unwrap_or(0.0);
+        let mom_change = if last_month_rev > 0.0 {
+            ((this_month_rev - last_month_rev) / last_month_rev * 100.0).round()
+        } else { 0.0 };
+
+        // Top 5 medicines today
+        let mut ts = c.prepare(
+            "SELECT bi.medicine_name, SUM(bi.quantity) AS qty, SUM(bi.total_amount) AS rev
+             FROM bill_items bi JOIN bills b ON b.id=bi.bill_id
+             WHERE b.status='active' AND date(b.bill_date)=date(?1)
+             GROUP BY bi.medicine_id ORDER BY rev DESC LIMIT 5"
+        )?;
+        let top_medicines: Vec<serde_json::Value> = ts.query_map(params![today], |r| Ok(serde_json::json!({
+            "name": r.get::<_,String>(0)?,
+            "qty": r.get::<_,i64>(1)?,
+            "revenue": r.get::<_,f64>(2)?
+        })))?.collect::<Result<Vec<_>,_>>().map_err(|e| AppError::Database(e.to_string()))?;
+
+        Ok(serde_json::json!({
+            "today_pl": {
+                "revenue": today_revenue,
+                "cogs": today_cogs,
+                "gross_profit": today_gross,
+                "expenses": today_expenses,
+                "net_profit": today_net,
+                "margin_pct": if today_revenue > 0.0 { (today_gross / today_revenue * 100.0).round() } else { 0.0 }
+            },
+            "cashier_sales": cashier_sales,
+            "expiry_buckets": { "days_7": exp7, "days_30": exp30, "days_90": exp90 },
+            "monthly": {
+                "this_month": this_month_rev,
+                "last_month": last_month_rev,
+                "mom_change_pct": mom_change
+            },
+            "top_medicines_today": top_medicines
+        }))
+    }
+
+    // ── SPRINT 11: P&L REPORT ────────────────────────────────
+
+    pub fn get_pl_report(&self, period: &str, year: i32, month: Option<i32>) -> Result<serde_json::Value, AppError> {
+        let c = self.open()?;
+        // Build date range
+        let (from_date, to_date) = if period == "monthly" {
+            let m = month.unwrap_or(1);
+            let last_day = match m {
+                1|3|5|7|8|10|12 => 31, 4|6|9|11 => 30, 2 => 28, _ => 30
+            };
+            (format!("{:04}-{:02}-01", year, m), format!("{:04}-{:02}-{:02}", year, m, last_day))
+        } else {
+            (format!("{:04}-04-01", year), format!("{:04}-03-31", year + 1))
+        };
+
+        // Revenue from bills
+        let revenue: f64 = c.query_row(
+            "SELECT COALESCE(SUM(net_amount),0) FROM bills WHERE status='active' AND date(bill_date) BETWEEN ?1 AND ?2",
+            params![from_date, to_date], |r| r.get(0)
+        ).unwrap_or(0.0);
+
+        // COGS: purchase_price × qty from bill_items → batches
+        let cogs: f64 = c.query_row(
+            "SELECT COALESCE(SUM(bi.quantity * b.purchase_price),0)
+             FROM bill_items bi
+             JOIN bills bl ON bl.id=bi.bill_id AND bl.status='active' AND date(bl.bill_date) BETWEEN ?1 AND ?2
+             JOIN batches b ON b.id=bi.batch_id",
+            params![from_date, to_date], |r| r.get(0)
+        ).unwrap_or(0.0);
+
+        // Expenses from expenses table
+        let expenses_total: f64 = c.query_row(
+            "SELECT COALESCE(SUM(amount),0) FROM expenses WHERE date(expense_date) BETWEEN ?1 AND ?2",
+            params![from_date, to_date], |r| r.get(0)
+        ).unwrap_or(0.0);
+
+        // Expenses by category
+        let mut exp_stmt = c.prepare(
+            "SELECT category, COALESCE(SUM(amount),0) FROM expenses WHERE date(expense_date) BETWEEN ?1 AND ?2 GROUP BY category ORDER BY 2 DESC"
+        )?;
+        let expense_breakdown: Vec<serde_json::Value> = exp_stmt.query_map(params![from_date, to_date], |r| {
+            Ok(json!({ "category": r.get::<_,String>(0)?, "amount": r.get::<_,f64>(1)? }))
+        })?.filter_map(|r| r.ok()).collect();
+
+        // Monthly breakdown for yearly view
+        let monthly_rows = if period == "yearly" {
+            let mut stmt = c.prepare(
+                "SELECT strftime('%m',bill_date) as mon,
+                        COALESCE(SUM(net_amount),0) as rev
+                 FROM bills WHERE status='active' AND date(bill_date) BETWEEN ?1 AND ?2
+                 GROUP BY mon ORDER BY mon"
+            )?;
+            let rows = stmt.query_map(params![from_date, to_date], |r| {
+                Ok(json!({ "month": r.get::<_,String>(0)?, "revenue": r.get::<_,f64>(1)? }))
+            })?.filter_map(|r| r.ok()).collect::<Vec<_>>();
+            rows
+        } else { vec![] };
+
+        // Bill count
+        let bill_count: i64 = c.query_row(
+            "SELECT COUNT(1) FROM bills WHERE status='active' AND date(bill_date) BETWEEN ?1 AND ?2",
+            params![from_date, to_date], |r| r.get(0)
+        ).unwrap_or(0);
+
+        let gross_profit = revenue - cogs;
+        let net_profit = gross_profit - expenses_total;
+        let gross_margin = if revenue > 0.0 { gross_profit / revenue * 100.0 } else { 0.0 };
+        let net_margin   = if revenue > 0.0 { net_profit  / revenue * 100.0 } else { 0.0 };
+
+        Ok(json!({
+            "period": period, "year": year, "month": month,
+            "from_date": from_date, "to_date": to_date,
+            "revenue": revenue, "cogs": cogs,
+            "gross_profit": gross_profit, "gross_margin_pct": gross_margin,
+            "expenses": expenses_total, "net_profit": net_profit, "net_margin_pct": net_margin,
+            "bill_count": bill_count,
+            "expense_breakdown": expense_breakdown,
+            "monthly_breakdown": monthly_rows,
+        }))
+    }
+
+    // ── SPRINT 11: AUDIT LOG ─────────────────────────────────
+
+    pub fn get_audit_log(&self, limit: i64, offset: i64, module: Option<String>, user_id: Option<i64>) -> Result<serde_json::Value, AppError> {
+        let c = self.open()?;
+        let conditions = vec!["1=1"];
+        // Build dynamic query safely using string matching on known-safe enum values
+        let module_filter = module.as_deref().unwrap_or("");
+        let uid_filter = user_id.unwrap_or(0);
+
+        let rows: Vec<serde_json::Value> = {
+            let mut stmt = c.prepare(
+                "SELECT al.id, al.user_name, al.action, al.module, al.record_id,
+                        al.notes, al.created_at, u.name as actor
+                 FROM audit_log al
+                 LEFT JOIN users u ON u.id=al.user_id
+                 WHERE (?1='' OR al.module=?1)
+                   AND (?2=0  OR al.user_id=?2)
+                 ORDER BY al.created_at DESC
+                 LIMIT ?3 OFFSET ?4"
+            )?;
+            let collected = stmt.query_map(params![module_filter, uid_filter, limit, offset], |r| {
+                Ok(json!({
+                    "id":         r.get::<_,i64>(0)?,
+                    "user_name":  r.get::<_,String>(1).unwrap_or_default(),
+                    "action":     r.get::<_,String>(2)?,
+                    "module":     r.get::<_,String>(3)?,
+                    "record_id":  r.get::<_,Option<String>>(4)?,
+                    "notes":      r.get::<_,Option<String>>(5)?,
+                    "created_at": r.get::<_,String>(6)?,
+                }))
+            })?.filter_map(|r| r.ok()).collect();
+            collected
+        };
+        let _ = conditions; // suppress unused warning
+
+        let total: i64 = c.query_row(
+            "SELECT COUNT(1) FROM audit_log WHERE (?1='' OR module=?1) AND (?2=0 OR user_id=?2)",
+            params![module_filter, uid_filter], |r| r.get(0)
+        ).unwrap_or(0);
+
+        // Distinct modules for filter dropdown
+        let mut mod_stmt = c.prepare("SELECT DISTINCT module FROM audit_log ORDER BY module")?;
+        let modules: Vec<String> = mod_stmt.query_map([], |r| r.get(0))?.filter_map(|r| r.ok()).collect();
+
+        Ok(json!({ "rows": rows, "total": total, "modules": modules }))
+    }
+
+    // ── SPRINT 11: REORDER ALERTS ────────────────────────────
+
+    pub fn get_reorder_alerts(&self) -> Result<serde_json::Value, AppError> {
+        let c = self.open()?;
+        let mut stmt = c.prepare(
+            "SELECT m.id, m.name, m.generic_name, m.reorder_level, m.reorder_quantity,
+                    COALESCE(SUM(b.quantity_in - b.quantity_sold - b.quantity_adjusted),0) AS current_stock,
+                    s.name AS supplier_name
+             FROM medicines m
+             LEFT JOIN batches b ON b.medicine_id=m.id AND b.is_active=1
+             LEFT JOIN (
+               SELECT medicine_id, MAX(supplier_id) AS supplier_id FROM batches GROUP BY medicine_id
+             ) ls ON ls.medicine_id=m.id
+             LEFT JOIN suppliers s ON s.id=ls.supplier_id
+             WHERE m.is_active=1 AND m.deleted_at IS NULL
+             GROUP BY m.id
+             HAVING current_stock <= m.reorder_level
+             ORDER BY current_stock ASC
+             LIMIT 100"
+        )?;
+        let rows: Vec<serde_json::Value> = stmt.query_map([], |r| {
+            Ok(json!({
+                "id":               r.get::<_,i64>(0)?,
+                "name":             r.get::<_,String>(1)?,
+                "generic_name":     r.get::<_,String>(2)?,
+                "reorder_level":    r.get::<_,i64>(3)?,
+                "reorder_quantity": r.get::<_,i64>(4)?,
+                "current_stock":    r.get::<_,f64>(5)?,
+                "supplier_name":    r.get::<_,Option<String>>(6)?,
+            }))
+        })?.filter_map(|r| r.ok()).collect();
+        let count = rows.len();
+        Ok(json!({ "alerts": rows, "count": count }))
+    }
+
+    // ── SPRINT 11: PRESCRIPTION HISTORY ──────────────────────
+
+    pub fn get_prescription_history(&self, customer_id: i64, limit: i64) -> Result<serde_json::Value, AppError> {
+        let c = self.open()?;
+        // Per-bill grouped history
+        let mut stmt = c.prepare(
+            "SELECT bl.id, bl.bill_number, bl.bill_date, bl.net_amount,
+                    d.name AS doctor_name, bl.status,
+                    (SELECT COUNT(1) FROM bill_items WHERE bill_id=bl.id) AS item_count
+             FROM bills bl
+             LEFT JOIN doctors d ON d.id=bl.doctor_id
+             WHERE bl.customer_id=?1 AND bl.status='active'
+             ORDER BY bl.bill_date DESC
+             LIMIT ?2"
+        )?;
+        let bills: Vec<serde_json::Value> = stmt.query_map(params![customer_id, limit], |r| {
+            Ok(json!({
+                "id":          r.get::<_,i64>(0)?,
+                "bill_number": r.get::<_,String>(1)?,
+                "bill_date":   r.get::<_,String>(2)?,
+                "net_amount":  r.get::<_,f64>(3)?,
+                "doctor_name": r.get::<_,Option<String>>(4)?,
+                "status":      r.get::<_,String>(5)?,
+                "item_count":  r.get::<_,i64>(6)?,
+            }))
+        })?.filter_map(|r| r.ok()).collect();
+
+        // Flatten all items for the customer — most dispensed medicines
+        let mut freq_stmt = c.prepare(
+            "SELECT bi.medicine_name,
+                    COUNT(1) AS visit_count,
+                    SUM(bi.quantity) AS total_qty,
+                    MAX(bl.bill_date) AS last_dispensed
+             FROM bill_items bi
+             JOIN bills bl ON bl.id=bi.bill_id AND bl.customer_id=?1 AND bl.status='active'
+             GROUP BY bi.medicine_name
+             ORDER BY visit_count DESC
+             LIMIT 20"
+        )?;
+        let frequent: Vec<serde_json::Value> = freq_stmt.query_map(params![customer_id], |r| {
+            Ok(json!({
+                "medicine_name":  r.get::<_,String>(0)?,
+                "visit_count":    r.get::<_,i64>(1)?,
+                "total_qty":      r.get::<_,i64>(2)?,
+                "last_dispensed": r.get::<_,String>(3)?,
+            }))
+        })?.filter_map(|r| r.ok()).collect();
+
+        let total_visits: i64 = c.query_row(
+            "SELECT COUNT(1) FROM bills WHERE customer_id=?1 AND status='active'",
+            params![customer_id], |r| r.get(0)
+        ).unwrap_or(0);
+
+        let total_spend: f64 = c.query_row(
+            "SELECT COALESCE(SUM(net_amount),0) FROM bills WHERE customer_id=?1 AND status='active'",
+            params![customer_id], |r| r.get(0)
+        ).unwrap_or(0.0);
+
+        Ok(json!({
+            "bills": bills, "frequent_medicines": frequent,
+            "total_visits": total_visits, "total_spend": total_spend,
+        }))
+    }
+
+    // ── SPRINT 11: SMS SETTINGS ──────────────────────────────
+
+    pub fn get_sms_settings(&self) -> Result<serde_json::Value, AppError> {
+        let c = self.open()?;
+        let get = |key: &str| -> String {
+            c.query_row("SELECT value FROM settings WHERE key=?1", params![key], |r| r.get::<_,String>(0))
+              .unwrap_or_else(|_| "\"\"".to_string())
+              .trim_matches('"').to_string()
+        };
+        Ok(json!({
+            "sms_enabled":   get("sms_enabled") == "true",
+            "sms_api_key":   get("sms_api_key"),
+            "sms_sender_id": get("sms_sender_id"),
+            "sms_provider":  get("sms_provider"),
+        }))
+    }
+
+    pub fn save_sms_settings(&self, api_key: String, sender_id: String, enabled: bool, uid: i64) -> Result<(), AppError> {
+        let c = self.open()?;
+        let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
+        for (key, val) in [
+            ("sms_api_key",   format!("\"{}\"", api_key)),
+            ("sms_sender_id", format!("\"{}\"", sender_id)),
+            ("sms_enabled",   format!("\"{}\"", if enabled { "true" } else { "false" })),
+        ] {
+            c.execute(
+                "INSERT INTO settings(key,value,updated_at,updated_by) VALUES(?1,?2,?3,?4) ON CONFLICT(key) DO UPDATE SET value=?2,updated_at=?3,updated_by=?4",
+                params![key, val, now, uid],
+            )?;
+        }
+        Ok(())
+    }
+
+    // ── SPRINT 10: ONBOARDING + BUSINESS PROFILE ─────────────
+
+    pub fn get_onboarding_status(&self) -> Result<serde_json::Value, AppError> {
+        let c = self.open()?;
+        let get_setting = |key: &str| -> String {
+            c.query_row("SELECT value FROM settings WHERE key=?1", params![key], |r| r.get::<_,String>(0))
+              .unwrap_or_else(|_| "\"\"".to_string())
+              .trim_matches('"').to_string()
+        };
+        Ok(json!({
+            "onboarding_complete": get_setting("onboarding_complete") == "true",
+            "gst_enabled": get_setting("gst_enabled") == "true",
+            "pharmacy_name": get_setting("pharmacy_name"),
+            "gstin": get_setting("gstin"),
+        }))
+    }
+
+    pub fn save_onboarding(
+        &self,
+        pharmacy_name: String,
+        pharmacy_address: String,
+        pharmacy_phone: String,
+        pin_code: String,
+        drug_licence_no: String,
+        gstin: String,
+        legal_name: String,
+        trade_name: String,
+        state_code: String,
+        state_name: String,
+        reg_type: String,
+        gst_enabled: bool,
+    ) -> Result<(), AppError> {
+        let c = self.open()?;
+        let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
+        let set = |key: &str, val: &str| {
+            format!("INSERT INTO settings(key,value,updated_at) VALUES('{}','\"{}\"','{}') ON CONFLICT(key) DO UPDATE SET value='\"{}\"',updated_at='{}';",
+                key, val.replace('"', ""), now, val.replace('"', ""), now)
+        };
+        let sql = [
+            set("pharmacy_name",  &pharmacy_name),
+            set("pharmacy_address",&pharmacy_address),
+            set("pharmacy_phone", &pharmacy_phone),
+            set("pin_code",       &pin_code),
+            set("drug_licence_no",&drug_licence_no),
+            set("gstin",          &gstin),
+            set("legal_name",     &legal_name),
+            set("trade_name",     &trade_name),
+            set("state_code",     &state_code),
+            set("state_name",     &state_name),
+            set("reg_type",       &reg_type),
+            set("gst_enabled",    if gst_enabled { "true" } else { "false" }),
+            set("onboarding_complete", "true"),
+        ].join("\n");
+        c.execute_batch(&sql)?;
+        Ok(())
+    }
+
+    pub fn get_business_profile(&self) -> Result<serde_json::Value, AppError> {
+        let c = self.open()?;
+        let get = |key: &str| -> String {
+            c.query_row("SELECT value FROM settings WHERE key=?1", params![key], |r| r.get::<_,String>(0))
+              .unwrap_or_else(|_| "\"\"".to_string())
+              .trim_matches('"').to_string()
+        };
+        Ok(json!({
+            "pharmacy_name":    get("pharmacy_name"),
+            "pharmacy_address": get("pharmacy_address"),
+            "pharmacy_phone":   get("pharmacy_phone"),
+            "pin_code":         get("pin_code"),
+            "drug_licence_no":  get("drug_licence_no"),
+            "gstin":            get("gstin"),
+            "legal_name":       get("legal_name"),
+            "trade_name":       get("trade_name"),
+            "state_code":       get("state_code"),
+            "state_name":       get("state_name"),
+            "reg_type":         get("reg_type"),
+            "gst_enabled":      get("gst_enabled") == "true",
+            "onboarding_complete": get("onboarding_complete") == "true",
+        }))
+    }
+
+    pub fn save_business_profile(
+        &self,
+        pharmacy_name: String,
+        pharmacy_address: String,
+        pharmacy_phone: String,
+        pin_code: String,
+        drug_licence_no: String,
+        gstin: String,
+        legal_name: String,
+        trade_name: String,
+        state_code: String,
+        state_name: String,
+        reg_type: String,
+        gst_enabled: bool,
+        uid: i64,
+    ) -> Result<(), AppError> {
+        let c = self.open()?;
+        let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
+        let pairs: &[(&str, &str)] = &[
+            ("pharmacy_name",    &pharmacy_name),
+            ("pharmacy_address", &pharmacy_address),
+            ("pharmacy_phone",   &pharmacy_phone),
+            ("pin_code",         &pin_code),
+            ("drug_licence_no",  &drug_licence_no),
+            ("gstin",            &gstin),
+            ("legal_name",       &legal_name),
+            ("trade_name",       &trade_name),
+            ("state_code",       &state_code),
+            ("state_name",       &state_name),
+            ("reg_type",         &reg_type),
+        ];
+        for (key, val) in pairs {
+            c.execute(
+                "INSERT INTO settings(key,value,updated_at,updated_by) VALUES(?1,?2,?3,?4) ON CONFLICT(key) DO UPDATE SET value=?2,updated_at=?3,updated_by=?4",
+                params![key, format!("\"{}\"", val.replace('"', "")), now, uid],
+            )?;
+        }
+        let gst_val = format!("\"{}\"", if gst_enabled { "true" } else { "false" });
+        c.execute(
+            "INSERT INTO settings(key,value,updated_at,updated_by) VALUES('gst_enabled',?1,?2,?3) ON CONFLICT(key) DO UPDATE SET value=?1,updated_at=?2,updated_by=?3",
+            params![gst_val, now, uid],
+        )?;
+        Ok(())
+    }
+
+    pub fn verify_gstin_format(gstin: &str) -> serde_json::Value {
+        let g = gstin.trim().to_uppercase();
+        let chars: Vec<char> = g.chars().collect();
+        let valid = chars.len() == 15
+            && chars[0].is_ascii_digit() && chars[1].is_ascii_digit()
+            && chars[2].is_ascii_uppercase() && chars[3].is_ascii_uppercase()
+            && chars[4].is_ascii_uppercase() && chars[5].is_ascii_uppercase()
+            && chars[6].is_ascii_uppercase()
+            && chars[7].is_ascii_digit() && chars[8].is_ascii_digit()
+            && chars[9].is_ascii_digit() && chars[10].is_ascii_digit()
+            && chars[11].is_ascii_uppercase()
+            && (chars[12].is_ascii_digit() || chars[12].is_ascii_uppercase()) && chars[12] != '0'
+            && chars[13] == 'Z'
+            && (chars[14].is_ascii_digit() || chars[14].is_ascii_uppercase());
+        if !valid {
+            return json!({ "valid": false, "message": "Invalid GSTIN format. Must be 15 characters: 2 state digits + 5 PAN letters + 4 PAN digits + entity + check + Z + checksum." });
+        }
+        let gstin = &g;
+        let state_code = &gstin[..2];
+        let state_name = match state_code {
+            "01" => "Jammu & Kashmir",    "02" => "Himachal Pradesh",
+            "03" => "Punjab",             "04" => "Chandigarh",
+            "05" => "Uttarakhand",        "06" => "Haryana",
+            "07" => "Delhi",              "08" => "Rajasthan",
+            "09" => "Uttar Pradesh",      "10" => "Bihar",
+            "11" => "Sikkim",             "12" => "Arunachal Pradesh",
+            "13" => "Nagaland",           "14" => "Manipur",
+            "15" => "Mizoram",            "16" => "Tripura",
+            "17" => "Meghalaya",          "18" => "Assam",
+            "19" => "West Bengal",        "20" => "Jharkhand",
+            "21" => "Odisha",             "22" => "Chhattisgarh",
+            "23" => "Madhya Pradesh",     "24" => "Gujarat",
+            "25" => "Daman & Diu",        "26" => "Dadra & Nagar Haveli",
+            "27" => "Maharashtra",        "28" => "Andhra Pradesh",
+            "29" => "Karnataka",          "30" => "Goa",
+            "31" => "Lakshadweep",        "32" => "Kerala",
+            "33" => "Tamil Nadu",         "34" => "Puducherry",
+            "35" => "Andaman & Nicobar", "36" => "Telangana",
+            "37" => "Andhra Pradesh",     "38" => "Ladakh",
+            "97" => "Other Territory",    "99" => "Centre Jurisdiction",
+            _ => "Unknown State",
+        };
+        // Extract PAN from GSTIN (chars 2-12)
+        let pan = &gstin[2..12];
+        json!({
+            "valid": true,
+            "state_code": state_code,
+            "state_name": state_name,
+            "pan": pan,
+            "message": format!("Valid GSTIN · State: {}", state_name),
+        })
+    }
+
+    // ── SPRINT 8: PURCHASE ORDERS ──────────────────────────────────
+
+    pub fn list_purchase_orders(&self, status: Option<&str>) -> Result<serde_json::Value, AppError> {
+        let c = self.open()?;
+        let mut s = c.prepare(
+            "SELECT po.id, po.po_number, po.status, po.order_date, po.expected_date,
+             po.total_amount, po.notes, po.created_at,
+             s.name AS supplier_name, s.phone AS supplier_phone
+             FROM purchase_orders po
+             JOIN suppliers s ON s.id = po.supplier_id
+             WHERE (?1 IS NULL OR po.status = ?1)
+             ORDER BY po.created_at DESC"
+        )?;
+        let rows: Vec<serde_json::Value> = s.query_map(params![status], |r| Ok(serde_json::json!({
+            "id": r.get::<_,i64>(0)?,
+            "po_number": r.get::<_,String>(1)?,
+            "status": r.get::<_,String>(2)?,
+            "order_date": r.get::<_,String>(3)?,
+            "expected_date": r.get::<_,Option<String>>(4)?,
+            "total_amount": r.get::<_,f64>(5)?,
+            "notes": r.get::<_,String>(6)?,
+            "created_at": r.get::<_,String>(7)?,
+            "supplier_name": r.get::<_,String>(8)?,
+            "supplier_phone": r.get::<_,Option<String>>(9)?
+        })))?.collect::<Result<Vec<_>,_>>().map_err(|e| AppError::Database(e.to_string()))?;
+        let count = rows.len();
+        Ok(serde_json::json!({"orders": rows, "count": count}))
+    }
+
+    pub fn get_purchase_order(&self, id: i64) -> Result<serde_json::Value, AppError> {
+        let c = self.open()?;
+        let po = c.query_row(
+            "SELECT po.id, po.po_number, po.status, po.order_date, po.expected_date,
+             po.total_amount, po.notes, po.created_at, po.supplier_id,
+             s.name AS supplier_name, s.phone AS supplier_phone, s.gstin AS supplier_gstin,
+             s.address AS supplier_address
+             FROM purchase_orders po
+             JOIN suppliers s ON s.id = po.supplier_id
+             WHERE po.id = ?1",
+            params![id], |r| Ok(serde_json::json!({
+                "id": r.get::<_,i64>(0)?,
+                "po_number": r.get::<_,String>(1)?,
+                "status": r.get::<_,String>(2)?,
+                "order_date": r.get::<_,String>(3)?,
+                "expected_date": r.get::<_,Option<String>>(4)?,
+                "total_amount": r.get::<_,f64>(5)?,
+                "notes": r.get::<_,String>(6)?,
+                "created_at": r.get::<_,String>(7)?,
+                "supplier_id": r.get::<_,i64>(8)?,
+                "supplier_name": r.get::<_,String>(9)?,
+                "supplier_phone": r.get::<_,Option<String>>(10)?,
+                "supplier_gstin": r.get::<_,Option<String>>(11)?,
+                "supplier_address": r.get::<_,Option<String>>(12)?
+            }))
+        ).optional()?.ok_or(AppError::Validation("PO not found.".into()))?;
+        let mut s = c.prepare(
+            "SELECT id, medicine_id, medicine_name, quantity_ordered, quantity_received, unit_price, total_amount
+             FROM purchase_order_items WHERE po_id = ?1 ORDER BY id"
+        )?;
+        let items: Vec<serde_json::Value> = s.query_map(params![id], |r| Ok(serde_json::json!({
+            "id": r.get::<_,i64>(0)?,
+            "medicine_id": r.get::<_,i64>(1)?,
+            "medicine_name": r.get::<_,String>(2)?,
+            "quantity_ordered": r.get::<_,i64>(3)?,
+            "quantity_received": r.get::<_,i64>(4)?,
+            "unit_price": r.get::<_,f64>(5)?,
+            "total_amount": r.get::<_,f64>(6)?
+        })))?.collect::<Result<Vec<_>,_>>().map_err(|e| AppError::Database(e.to_string()))?;
+        let mut result = po;
+        result["items"] = serde_json::json!(items);
+        Ok(result)
+    }
+
+    pub fn create_purchase_order(&self, inp: &serde_json::Value, uid: i64) -> Result<i64, AppError> {
+        let c = self.open()?;
+        let seq: i64 = c.query_row(
+            "SELECT COALESCE(MAX(CAST(SUBSTR(po_number, 4) AS INTEGER)), 0) + 1 FROM purchase_orders",
+            [], |r| r.get(0)
+        )?;
+        let po_number = format!("PO-{:05}", seq);
+        let items = inp["items"].as_array().cloned().unwrap_or_default();
+        let total: f64 = items.iter().map(|i| i["total_amount"].as_f64().unwrap_or(0.0)).sum();
+        let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+        c.execute(
+            "INSERT INTO purchase_orders(po_number, supplier_id, status, order_date, expected_date, notes, total_amount, created_by)
+             VALUES(?1,?2,'draft',?3,?4,?5,?6,?7)",
+            params![
+                po_number,
+                inp["supplier_id"].as_i64().ok_or(AppError::Validation("supplier_id required".into()))?,
+                inp["order_date"].as_str().unwrap_or(&today),
+                inp["expected_date"].as_str(),
+                inp["notes"].as_str().unwrap_or(""),
+                total,
+                uid
+            ]
+        )?;
+        let po_id = c.last_insert_rowid();
+        for item in &items {
+            let qty = item["quantity_ordered"].as_i64().unwrap_or(0);
+            let price = item["unit_price"].as_f64().unwrap_or(0.0);
+            c.execute(
+                "INSERT INTO purchase_order_items(po_id, medicine_id, medicine_name, quantity_ordered, unit_price, total_amount)
+                 VALUES(?1,?2,?3,?4,?5,?6)",
+                params![
+                    po_id,
+                    item["medicine_id"].as_i64(),
+                    item["medicine_name"].as_str().unwrap_or(""),
+                    qty,
+                    price,
+                    qty as f64 * price
+                ]
+            )?;
+        }
+        Ok(po_id)
+    }
+
+    pub fn update_purchase_order_status(&self, id: i64, status: &str, uid: i64) -> Result<(), AppError> {
+        let valid = ["draft","sent","partially_received","received","cancelled"];
+        if !valid.contains(&status) {
+            return Err(AppError::Validation(format!("Invalid status: {}", status)));
+        }
+        let c = self.open()?;
+        c.execute(
+            "UPDATE purchase_orders SET status=?1, updated_at=datetime('now') WHERE id=?2",
+            params![status, id]
+        )?;
+        self.audit("update_po_status", "purchase_orders", &id.to_string(),
+            None, Some(&format!("status={}", status)), &uid.to_string())?;
+        Ok(())
+    }
+
+    pub fn auto_generate_po(&self, _uid: i64) -> Result<serde_json::Value, AppError> {
+        let c = self.open()?;
+        let mut s = c.prepare(
+            "SELECT m.id, m.name, m.reorder_level, m.reorder_quantity,
+             COALESCE(SUM(b.quantity_in - b.quantity_sold - b.quantity_adjusted), 0) AS stock
+             FROM medicines m
+             LEFT JOIN batches b ON b.medicine_id = m.id AND b.is_active = 1
+               AND date(b.expiry_date) > date('now')
+             WHERE m.is_active = 1 AND m.deleted_at IS NULL
+             GROUP BY m.id
+             HAVING stock <= m.reorder_level
+             ORDER BY stock ASC, m.name ASC"
+        )?;
+        let items: Vec<serde_json::Value> = s.query_map([], |r| Ok(serde_json::json!({
+            "medicine_id": r.get::<_,i64>(0)?,
+            "medicine_name": r.get::<_,String>(1)?,
+            "reorder_level": r.get::<_,i64>(2)?,
+            "reorder_quantity": r.get::<_,i64>(3)?,
+            "current_stock": r.get::<_,i64>(4)?
+        })))?.collect::<Result<Vec<_>,_>>().map_err(|e| AppError::Database(e.to_string()))?;
+        let count = items.len();
+        Ok(serde_json::json!({
+            "suggestions": items,
+            "count": count,
+            "message": format!("{} medicines need restocking", count)
+        }))
+    }
+
+    // ── SPRINT 8: EXPENSES ────────────────────────────────────
+
+    pub fn list_expenses(&self, from: &str, to: &str, category: Option<&str>) -> Result<serde_json::Value, AppError> {
+        let c = self.open()?;
+        let mut s = c.prepare(
+            "SELECT id, expense_date, category, description, amount, payment_mode,
+             reference_no, vendor_name, notes, created_at
+             FROM expenses
+             WHERE (?1='' OR date(expense_date) >= date(?1))
+             AND (?2='' OR date(expense_date) <= date(?2))
+             AND (?3 IS NULL OR category = ?3)
+             ORDER BY expense_date DESC, id DESC"
+        )?;
+        let rows: Vec<serde_json::Value> = s.query_map(params![from, to, category], |r| Ok(serde_json::json!({
+            "id": r.get::<_,i64>(0)?,
+            "expense_date": r.get::<_,String>(1)?,
+            "category": r.get::<_,String>(2)?,
+            "description": r.get::<_,String>(3)?,
+            "amount": r.get::<_,f64>(4)?,
+            "payment_mode": r.get::<_,String>(5)?,
+            "reference_no": r.get::<_,String>(6)?,
+            "vendor_name": r.get::<_,String>(7)?,
+            "notes": r.get::<_,String>(8)?,
+            "created_at": r.get::<_,String>(9)?
+        })))?.collect::<Result<Vec<_>,_>>().map_err(|e| AppError::Database(e.to_string()))?;
+        let total: f64 = rows.iter().map(|r| r["amount"].as_f64().unwrap_or(0.0)).sum();
+        let count = rows.len();
+        Ok(serde_json::json!({"expenses": rows, "count": count, "total": total}))
+    }
+
+    pub fn create_expense(&self, inp: &serde_json::Value, uid: i64) -> Result<i64, AppError> {
+        let c = self.open()?;
+        let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+        c.execute(
+            "INSERT INTO expenses(expense_date,category,description,amount,payment_mode,reference_no,vendor_name,notes,created_by)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+            params![
+                inp["expense_date"].as_str().unwrap_or(&today),
+                inp["category"].as_str().unwrap_or("General"),
+                inp["description"].as_str().unwrap_or(""),
+                inp["amount"].as_f64().unwrap_or(0.0),
+                inp["payment_mode"].as_str().unwrap_or("cash"),
+                inp["reference_no"].as_str().unwrap_or(""),
+                inp["vendor_name"].as_str().unwrap_or(""),
+                inp["notes"].as_str().unwrap_or(""),
+                uid
+            ]
+        )?;
+        Ok(c.last_insert_rowid())
+    }
+
+    pub fn update_expense(&self, id: i64, inp: &serde_json::Value) -> Result<(), AppError> {
+        let c = self.open()?;
+        c.execute(
+            "UPDATE expenses SET expense_date=?1,category=?2,description=?3,amount=?4,
+             payment_mode=?5,reference_no=?6,vendor_name=?7,notes=?8,updated_at=datetime('now')
+             WHERE id=?9",
+            params![
+                inp["expense_date"].as_str().unwrap_or(""),
+                inp["category"].as_str().unwrap_or("General"),
+                inp["description"].as_str().unwrap_or(""),
+                inp["amount"].as_f64().unwrap_or(0.0),
+                inp["payment_mode"].as_str().unwrap_or("cash"),
+                inp["reference_no"].as_str().unwrap_or(""),
+                inp["vendor_name"].as_str().unwrap_or(""),
+                inp["notes"].as_str().unwrap_or(""),
+                id
+            ]
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_expense(&self, id: i64) -> Result<(), AppError> {
+        let c = self.open()?;
+        c.execute("DELETE FROM expenses WHERE id=?1", params![id])?;
+        Ok(())
+    }
+
+    pub fn get_cash_book(&self, from: &str, to: &str) -> Result<serde_json::Value, AppError> {
+        let c = self.open()?;
+        let cash_sales: f64 = c.query_row(
+            "SELECT COALESCE(SUM(p.amount),0) FROM payments p
+             WHERE p.payment_mode='cash'
+             AND (?1='' OR date(p.payment_date) >= date(?1))
+             AND (?2='' OR date(p.payment_date) <= date(?2))",
+            params![from, to], |r| r.get(0)
+        ).unwrap_or(0.0);
+        let cash_expenses: f64 = c.query_row(
+            "SELECT COALESCE(SUM(amount),0) FROM expenses
+             WHERE payment_mode='cash'
+             AND (?1='' OR date(expense_date) >= date(?1))
+             AND (?2='' OR date(expense_date) <= date(?2))",
+            params![from, to], |r| r.get(0)
+        ).unwrap_or(0.0);
+        let cash_purchases: f64 = c.query_row(
+            "SELECT COALESCE(SUM(p.amount),0) FROM payments p
+             WHERE p.purchase_bill_id IS NOT NULL AND p.payment_mode='cash'
+             AND (?1='' OR date(p.payment_date) >= date(?1))
+             AND (?2='' OR date(p.payment_date) <= date(?2))",
+            params![from, to], |r| r.get(0)
+        ).unwrap_or(0.0);
+        Ok(serde_json::json!({
+            "period": {"from": from, "to": to},
+            "cash_sales": cash_sales,
+            "cash_expenses": cash_expenses,
+            "cash_purchases": cash_purchases,
+            "net_cash": cash_sales - cash_expenses - cash_purchases
+        }))
+    }
+
+    pub fn get_expense_summary(&self, from: &str, to: &str) -> Result<serde_json::Value, AppError> {
+        let c = self.open()?;
+        let mut s = c.prepare(
+            "SELECT category, SUM(amount) AS total, COUNT(1) AS cnt
+             FROM expenses
+             WHERE (?1='' OR date(expense_date) >= date(?1))
+             AND (?2='' OR date(expense_date) <= date(?2))
+             GROUP BY category ORDER BY total DESC"
+        )?;
+        let rows: Vec<serde_json::Value> = s.query_map(params![from, to], |r| Ok(serde_json::json!({
+            "category": r.get::<_,String>(0)?,
+            "total": r.get::<_,f64>(1)?,
+            "count": r.get::<_,i64>(2)?
+        })))?.collect::<Result<Vec<_>,_>>().map_err(|e| AppError::Database(e.to_string()))?;
+        let grand_total: f64 = rows.iter().map(|r| r["total"].as_f64().unwrap_or(0.0)).sum();
+        Ok(serde_json::json!({"by_category": rows, "grand_total": grand_total}))
+    }
+
+    // ── SPRINT 8: SUPPLIER CREDIT NOTES ──────────────────────
+
+    pub fn list_supplier_credit_notes(&self, supplier_id: Option<i64>) -> Result<serde_json::Value, AppError> {
+        let c = self.open()?;
+        let mut s = c.prepare(
+            "SELECT cn.id, cn.cn_number, cn.cn_date, cn.reason, cn.total_amount, cn.status, cn.notes,
+             s.name AS supplier_name, pb.bill_number AS purchase_bill_number
+             FROM supplier_credit_notes cn
+             JOIN suppliers s ON s.id = cn.supplier_id
+             LEFT JOIN purchase_bills pb ON pb.id = cn.purchase_bill_id
+             WHERE (?1 IS NULL OR cn.supplier_id = ?1)
+             ORDER BY cn.created_at DESC"
+        )?;
+        let rows: Vec<serde_json::Value> = s.query_map(params![supplier_id], |r| Ok(serde_json::json!({
+            "id": r.get::<_,i64>(0)?,
+            "cn_number": r.get::<_,String>(1)?,
+            "cn_date": r.get::<_,String>(2)?,
+            "reason": r.get::<_,String>(3)?,
+            "total_amount": r.get::<_,f64>(4)?,
+            "status": r.get::<_,String>(5)?,
+            "notes": r.get::<_,String>(6)?,
+            "supplier_name": r.get::<_,String>(7)?,
+            "purchase_bill_number": r.get::<_,Option<String>>(8)?
+        })))?.collect::<Result<Vec<_>,_>>().map_err(|e| AppError::Database(e.to_string()))?;
+        let count = rows.len();
+        Ok(serde_json::json!({"credit_notes": rows, "count": count}))
+    }
+
+    pub fn create_supplier_credit_note(&self, inp: &serde_json::Value, uid: i64) -> Result<i64, AppError> {
+        let c = self.open()?;
+        let seq: i64 = c.query_row(
+            "SELECT COALESCE(MAX(CAST(SUBSTR(cn_number, 4) AS INTEGER)), 0) + 1 FROM supplier_credit_notes",
+            [], |r| r.get(0)
+        )?;
+        let cn_number = format!("CN-{:05}", seq);
+        let items = inp["items"].as_array().cloned().unwrap_or_default();
+        let total: f64 = items.iter().map(|i| i["total_amount"].as_f64().unwrap_or(0.0)).sum();
+        let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+        c.execute(
+            "INSERT INTO supplier_credit_notes(cn_number,supplier_id,purchase_bill_id,cn_date,reason,total_amount,notes,created_by)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",
+            params![
+                cn_number,
+                inp["supplier_id"].as_i64().ok_or(AppError::Validation("supplier_id required".into()))?,
+                inp["purchase_bill_id"].as_i64(),
+                inp["cn_date"].as_str().unwrap_or(&today),
+                inp["reason"].as_str().unwrap_or("damaged"),
+                total,
+                inp["notes"].as_str().unwrap_or(""),
+                uid
+            ]
+        )?;
+        let cn_id = c.last_insert_rowid();
+        for item in &items {
+            let qty = item["quantity"].as_i64().unwrap_or(0);
+            let price = item["unit_price"].as_f64().unwrap_or(0.0);
+            c.execute(
+                "INSERT INTO supplier_credit_note_items(cn_id,medicine_id,medicine_name,batch_number,quantity,unit_price,total_amount)
+                 VALUES(?1,?2,?3,?4,?5,?6,?7)",
+                params![
+                    cn_id,
+                    item["medicine_id"].as_i64(),
+                    item["medicine_name"].as_str().unwrap_or(""),
+                    item["batch_number"].as_str().unwrap_or(""),
+                    qty,
+                    price,
+                    qty as f64 * price
+                ]
+            )?;
+        }
+        Ok(cn_id)
+    }
+
+    pub fn apply_supplier_credit_note(&self, cn_id: i64, uid: i64) -> Result<(), AppError> {
+        let c = self.open()?;
+        let cn = c.query_row(
+            "SELECT supplier_id, total_amount, status FROM supplier_credit_notes WHERE id=?1",
+            params![cn_id], |r| Ok((r.get::<_,i64>(0)?, r.get::<_,f64>(1)?, r.get::<_,String>(2)?))
+        ).optional()?.ok_or(AppError::Validation("Credit note not found.".into()))?;
+        if cn.2 != "pending" {
+            return Err(AppError::Validation("Credit note already applied or rejected.".into()));
+        }
+        c.execute(
+            "UPDATE suppliers SET outstanding_balance = MAX(0, outstanding_balance - ?1), updated_at=datetime('now') WHERE id=?2",
+            params![cn.1, cn.0]
+        )?;
+        c.execute(
+            "UPDATE supplier_credit_notes SET status='applied' WHERE id=?1",
+            params![cn_id]
+        )?;
+        self.audit("apply_credit_note", "supplier_credit_notes", &cn_id.to_string(),
+            None, Some(&format!("amount={}", cn.1)), &uid.to_string())?;
+        Ok(())
+    }
+
+    // ── SPRINT 8: LOYALTY SETTINGS ────────────────────────────
+
+    pub fn get_loyalty_settings(&self) -> Result<(i64, i64, i64), AppError> {
+        let earn: i64 = self.get_setting("loyalty_earn_rate")?.unwrap_or("\"100\"".into())
+            .trim_matches('"').parse().unwrap_or(100);
+        let redeem: i64 = self.get_setting("loyalty_redeem_rate")?.unwrap_or("\"1\"".into())
+            .trim_matches('"').parse().unwrap_or(1);
+        let min: i64 = self.get_setting("loyalty_min_redeem")?.unwrap_or("\"50\"".into())
+            .trim_matches('"').parse().unwrap_or(50);
+        Ok((earn, redeem, min))
+    }
+
+    // ── SPRINT 8: BILL AMENDMENT ──────────────────────────────
+
+    pub fn create_bill_amendment(&self, original_bill_id: i64, reason: &str, uid: i64) -> Result<i64, AppError> {
+        let c = self.open()?;
+        c.execute(
+            "UPDATE bills SET status='amended', notes=COALESCE(notes||' | ','')|| 'AMENDED: '||?1 WHERE id=?2 AND status='active'",
+            params![reason, original_bill_id]
+        )?;
+        c.execute(
+            "INSERT INTO bill_amendments(original_bill_id, reason, amendment_type, created_by)
+             VALUES(?1,?2,'correction',?3)",
+            params![original_bill_id, reason, uid]
+        )?;
+        let amend_id = c.last_insert_rowid();
+        self.audit("bill_amendment", "bills", &original_bill_id.to_string(),
+            Some("status=active"), Some(&format!("status=amended, reason={}", reason)), &uid.to_string())?;
+        Ok(amend_id)
+    }
+
+    pub fn get_bill_amendments(&self, bill_id: i64) -> Result<serde_json::Value, AppError> {
+        let c = self.open()?;
+        let mut s = c.prepare(
+            "SELECT ba.id, ba.original_bill_id, ba.amendment_type, ba.reason,
+             ba.created_at, u.name AS created_by_name
+             FROM bill_amendments ba
+             LEFT JOIN users u ON u.id = ba.created_by
+             WHERE ba.original_bill_id = ?1
+             ORDER BY ba.created_at DESC"
+        )?;
+        let rows: Vec<serde_json::Value> = s.query_map(params![bill_id], |r| Ok(serde_json::json!({
+            "id": r.get::<_,i64>(0)?,
+            "original_bill_id": r.get::<_,i64>(1)?,
+            "amendment_type": r.get::<_,String>(2)?,
+            "reason": r.get::<_,String>(3)?,
+            "created_at": r.get::<_,String>(4)?,
+            "created_by": r.get::<_,Option<String>>(5)?
+        })))?.collect::<Result<Vec<_>,_>>().map_err(|e| AppError::Database(e.to_string()))?;
+        Ok(serde_json::json!({"amendments": rows}))
+    }
+
+    // ── SPRINT 8: DEAD STOCK REPORT ───────────────────────────
+
+    pub fn get_dead_stock_report(&self, days: i64) -> Result<serde_json::Value, AppError> {
+        let c = self.open()?;
+        let mut s = c.prepare(
+            "SELECT m.id, m.name, m.generic_name, m.schedule,
+             COALESCE(SUM(b.quantity_in - b.quantity_sold - b.quantity_adjusted), 0) AS stock,
+             MAX(b.expiry_date) AS latest_expiry,
+             COALESCE(MAX(bi.last_sold), 'Never') AS last_sold_date,
+             COALESCE(SUM(b.quantity_in * b.purchase_price), 0) AS stock_value
+             FROM medicines m
+             JOIN batches b ON b.medicine_id = m.id AND b.is_active=1
+               AND date(b.expiry_date) > date('now')
+             LEFT JOIN (
+               SELECT bi2.medicine_id, MAX(bl.bill_date) AS last_sold
+               FROM bill_items bi2 JOIN bills bl ON bl.id=bi2.bill_id
+               WHERE bl.status='active'
+               GROUP BY bi2.medicine_id
+             ) bi ON bi.medicine_id = m.id
+             WHERE m.is_active=1 AND m.deleted_at IS NULL
+             GROUP BY m.id
+             HAVING stock > 0
+               AND (bi.last_sold IS NULL OR julianday('now') - julianday(bi.last_sold) > ?1)
+             ORDER BY stock_value DESC"
+        )?;
+        let rows: Vec<serde_json::Value> = s.query_map(params![days], |r| Ok(serde_json::json!({
+            "id": r.get::<_,i64>(0)?,
+            "name": r.get::<_,String>(1)?,
+            "generic_name": r.get::<_,String>(2)?,
+            "schedule": r.get::<_,String>(3)?,
+            "stock": r.get::<_,i64>(4)?,
+            "latest_expiry": r.get::<_,String>(5)?,
+            "last_sold_date": r.get::<_,String>(6)?,
+            "stock_value": r.get::<_,f64>(7)?
+        })))?.collect::<Result<Vec<_>,_>>().map_err(|e| AppError::Database(e.to_string()))?;
+        let total_value: f64 = rows.iter().map(|r| r["stock_value"].as_f64().unwrap_or(0.0)).sum();
+        let count = rows.len();
+        Ok(serde_json::json!({
+            "dead_stock": rows,
+            "count": count,
+            "total_value": total_value,
+            "days_threshold": days
+        }))
+    }
+
+    // ── TECH SETUP: OWNER ACCOUNT UPSERT ─────────────────────
+
+    pub fn tech_upsert_owner(&self, name: &str, email: &str, password: &str) -> Result<(), AppError> {
+        let c = self.open()?;
+        let hash = bcrypt::hash(password, 10)
+            .map_err(|e| AppError::Internal(format!("bcrypt: {e}")))?;
+        // Check if an admin user exists
+        let admin_id: Option<i64> = c.query_row(
+            "SELECT id FROM users WHERE role_name='admin' ORDER BY id LIMIT 1",
+            [], |r| r.get(0)
+        ).optional()?;
+        if let Some(id) = admin_id {
+            // Update existing admin
+            c.execute(
+                "UPDATE users SET name=?1, email=?2, password_hash=?3, updated_at=datetime('now') WHERE id=?4",
+                params![name, email, hash, id],
+            )?;
+        } else {
+            // Create new admin
+            let uid = uuid::Uuid::new_v4().to_string();
+            c.execute(
+                "INSERT INTO users(uid,name,email,password_hash,role_name,is_active,created_at,updated_at)
+                 VALUES(?1,?2,?3,?4,'admin',1,datetime('now'),datetime('now'))",
+                params![uid, name, email, hash],
+            )?;
+        }
+        Ok(())
+    }
+
+    // ── SPRINT 12: E-INVOICE + E-WAY BILL COMPLIANCE ─────────
+
+    pub fn save_irn(&self, bill_id: i64, irn: &str, qr_code: &str, ack_no: &str, ack_date: &str, signed_invoice: &str) -> Result<(), AppError> {
+        let c = self.open()?;
+        c.execute(
+            "INSERT INTO bill_gst_compliance(bill_id,irn,ack_no,ack_date,qr_code,signed_invoice,generated_at)
+             VALUES(?1,?2,?3,?4,?5,?6,datetime('now'))
+             ON CONFLICT(bill_id) DO UPDATE SET
+               irn=excluded.irn, ack_no=excluded.ack_no, ack_date=excluded.ack_date,
+               qr_code=excluded.qr_code, signed_invoice=excluded.signed_invoice,
+               generated_at=excluded.generated_at",
+            params![bill_id, irn, ack_no, ack_date, qr_code, signed_invoice],
+        )?;
+        Ok(())
+    }
+
+    pub fn save_ewb(&self, bill_id: i64, ewb_no: &str, ewb_date: &str, ewb_valid_until: &str) -> Result<(), AppError> {
+        let c = self.open()?;
+        c.execute(
+            "INSERT INTO bill_gst_compliance(bill_id,ewb_no,ewb_date,ewb_valid_until,generated_at)
+             VALUES(?1,?2,?3,?4,datetime('now'))
+             ON CONFLICT(bill_id) DO UPDATE SET
+               ewb_no=excluded.ewb_no, ewb_date=excluded.ewb_date,
+               ewb_valid_until=excluded.ewb_valid_until",
+            params![bill_id, ewb_no, ewb_date, ewb_valid_until],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_bill_compliance(&self, bill_id: i64) -> Result<serde_json::Value, AppError> {
+        let c = self.open()?;
+        let row = c.query_row(
+            "SELECT irn, ack_no, ack_date, qr_code, signed_invoice, ewb_no, ewb_date, ewb_valid_until, generated_at
+             FROM bill_gst_compliance WHERE bill_id=?1",
+            params![bill_id],
+            |r| Ok(serde_json::json!({
+                "irn":            r.get::<_,Option<String>>(0)?,
+                "ack_no":         r.get::<_,Option<String>>(1)?,
+                "ack_date":       r.get::<_,Option<String>>(2)?,
+                "qr_code":        r.get::<_,Option<String>>(3)?,
+                "signed_invoice": r.get::<_,Option<String>>(4)?,
+                "ewb_no":         r.get::<_,Option<String>>(5)?,
+                "ewb_date":       r.get::<_,Option<String>>(6)?,
+                "ewb_valid_until":r.get::<_,Option<String>>(7)?,
+                "generated_at":   r.get::<_,Option<String>>(8)?
+            }))
+        ).optional()?;
+        Ok(row.unwrap_or(serde_json::json!({"irn":null,"ewb_no":null})))
     }
 
 }

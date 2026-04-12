@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from "react"
-import { Plus, Search, Users, Edit, X, CreditCard, History, Phone, Mail } from "lucide-react"
+import { Plus, Search, Users, Edit, X, CreditCard, History, Phone, Mail, ClipboardList } from "lucide-react"
 import toast from "react-hot-toast"
+import { invoke } from "@tauri-apps/api/core"
 import { customerService } from "@/services/customerService"
 import { useAuthStore } from "@/store/authStore"
 import { useDebounce } from "@/hooks/useDebounce"
@@ -23,6 +24,7 @@ export default function CustomersPage() {
   const [showForm, setShowForm] = useState(false)
   const [editCust, setEditCust] = useState<ICustomer | null>(null)
   const [showPayment, setShowPayment] = useState(false)
+  const [showPrescHist, setShowPrescHist] = useState(false)
   const q = useDebounce(search, 300)
 
   const load = useCallback(async () => {
@@ -121,6 +123,7 @@ export default function CustomersPage() {
                 </div>
                 <div className="flex gap-2">
                   <button onClick={() => { setEditCust(selected); setShowForm(true) }} className="btn-ghost text-xs"><Edit size={14} />Edit</button>
+                  <button onClick={() => setShowPrescHist(true)} className="btn-ghost text-xs"><ClipboardList size={14} />Rx History</button>
                   {selected.outstanding_balance > 0 && (
                     <button onClick={() => setShowPayment(true)} className="btn-primary text-xs px-3 py-2"><CreditCard size={14} />Collect Payment</button>
                   )}
@@ -197,6 +200,12 @@ export default function CustomersPage() {
             setSelected(updated)
             load()
           }} />
+      )}
+
+      {showPrescHist && selected && (
+        <PrescriptionHistoryModal
+          customer={selected}
+          onClose={() => setShowPrescHist(false)} />
       )}
     </div>
   )
@@ -331,6 +340,101 @@ function PaymentCollector({ customer, uid, onClose, onSaved }: { customer: ICust
           <button onClick={handlePay} disabled={saving} className="btn-primary flex-1">
             {saving ? <><Spinner size="sm" />Saving…</> : "Record Payment"}
           </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+interface PrescHist {
+  bills: { bill_number: string; bill_date: string; net_amount: number; doctor_name: string | null; items: { medicine_name: string; quantity: number }[] }[]
+  frequent_medicines: { medicine_name: string; total_qty: number; times_purchased: number }[]
+}
+
+function PrescriptionHistoryModal({ customer, onClose }: { customer: ICustomer; onClose: () => void }) {
+  const [data,    setData]    = useState<PrescHist | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    invoke<PrescHist>("prescription_history", { customerId: customer.id, limit: 30 })
+      .then(r => setData(r))
+      .catch(() => toast.error("Could not load prescription history."))
+      .finally(() => setLoading(false))
+  }, [customer.id])
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 animate-fade-in">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col animate-slide-up">
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+          <div className="flex items-center gap-2">
+            <ClipboardList size={18} className="text-blue-600"/>
+            <div>
+              <h2 className="text-base font-bold text-slate-900">Prescription History</h2>
+              <p className="text-xs text-slate-500">{customer.name}</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100"><X size={16}/></button>
+        </div>
+
+        {loading ? (
+          <div className="flex items-center justify-center py-16"><Spinner size="lg"/></div>
+        ) : !data ? (
+          <EmptyState icon={<ClipboardList size={40}/>} title="No prescription history"/>
+        ) : (
+          <div className="flex-1 overflow-y-auto p-5 space-y-5">
+            {/* Frequent medicines */}
+            {data.frequent_medicines.length > 0 && (
+              <div>
+                <h3 className="text-sm font-semibold text-slate-700 mb-2">Frequent Medicines</h3>
+                <div className="flex flex-wrap gap-2">
+                  {data.frequent_medicines.map((m, i) => (
+                    <div key={i} className="bg-blue-50 border border-blue-100 rounded-xl px-3 py-1.5 text-center">
+                      <p className="text-xs font-semibold text-blue-800">{m.medicine_name}</p>
+                      <p className="text-[11px] text-blue-500">{m.total_qty} units · {m.times_purchased}×</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Bill timeline */}
+            <div>
+              <h3 className="text-sm font-semibold text-slate-700 mb-2">Bill History ({data.bills.length})</h3>
+              {data.bills.length === 0
+                ? <p className="text-sm text-slate-400">No bills found.</p>
+                : (
+                  <div className="space-y-3">
+                    {data.bills.map((bill, i) => (
+                      <div key={i} className="border border-slate-200 rounded-xl overflow-hidden">
+                        <div className="flex items-center justify-between px-4 py-2.5 bg-slate-50">
+                          <div>
+                            <span className="text-sm font-semibold text-slate-800">{bill.bill_number}</span>
+                            {bill.doctor_name && <span className="text-xs text-slate-500 ml-2">Dr. {bill.doctor_name}</span>}
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <span className="text-xs text-slate-500">{formatDate(bill.bill_date)}</span>
+                            <span className="text-sm font-bold text-slate-900">{formatCurrency(bill.net_amount)}</span>
+                          </div>
+                        </div>
+                        <div className="px-4 py-2 flex flex-wrap gap-1.5">
+                          {bill.items.map((item, j) => (
+                            <span key={j} className="text-xs bg-white border border-slate-200 rounded-full px-2 py-0.5 text-slate-600">
+                              {item.medicine_name} ×{item.quantity}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )
+              }
+            </div>
+          </div>
+        )}
+
+        <div className="px-5 py-3 border-t border-slate-100">
+          <button onClick={onClose} className="btn-secondary w-full text-sm">Close</button>
         </div>
       </div>
     </div>

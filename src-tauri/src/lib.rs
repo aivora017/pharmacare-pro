@@ -119,6 +119,7 @@ pub fn run() {
             commands::gst::gst_reconcile_gstr2b,
             commands::gst::gst_generate_einvoice,
             commands::gst::gst_generate_ewaybill,
+            commands::gst::gst_bill_compliance,
             // Sprint 7 — Compliance Registers
             commands::compliance::compliance_list_narcotic,
             commands::compliance::compliance_create_narcotic,
@@ -135,6 +136,57 @@ pub fn run() {
             commands::compliance::compliance_list_interactions,
             commands::compliance::compliance_create_interaction,
             commands::compliance::compliance_delete_interaction,
+            // Sprint 8 — Purchase Orders
+            commands::purchase_orders::po_list,
+            commands::purchase_orders::po_get,
+            commands::purchase_orders::po_create,
+            commands::purchase_orders::po_update_status,
+            commands::purchase_orders::po_auto_generate,
+            // Sprint 8 — Expenses
+            commands::expenses::expense_list,
+            commands::expenses::expense_create,
+            commands::expenses::expense_update,
+            commands::expenses::expense_delete,
+            commands::expenses::expense_cash_book,
+            commands::expenses::expense_summary,
+            // Sprint 8 — Supplier Credit Notes
+            commands::supplier_credit::supplier_credit_list,
+            commands::supplier_credit::supplier_credit_create,
+            commands::supplier_credit::supplier_credit_apply,
+            // Sprint 8 — Reports + Bill Amendment
+            commands::reports_sprint8::reports_dead_stock,
+            commands::reports_sprint8::billing_create_amendment,
+            commands::reports_sprint8::billing_get_amendments,
+            // Sprint 9 — Schemes
+            commands::schemes::scheme_list,
+            commands::schemes::scheme_create,
+            commands::schemes::scheme_update,
+            commands::schemes::scheme_delete,
+            commands::schemes::scheme_get_applicable,
+            // Sprint 9 — Collections + Extended Dashboard
+            commands::collections::collection_list_outstanding,
+            commands::collections::collection_record,
+            commands::collections::collection_history,
+            commands::collections::dashboard_extended,
+            // Sprint 10 — Onboarding + Business Profile
+            commands::onboarding::onboarding_status,
+            commands::onboarding::onboarding_save,
+            commands::onboarding::business_profile_get,
+            commands::onboarding::business_profile_save,
+            commands::onboarding::gstin_verify,
+            // Sprint 11 — P&L, Audit Log, Reorder, Prescription History, SMS
+            commands::reports_sprint11::pl_report,
+            commands::reports_sprint11::audit_log_list,
+            commands::reports_sprint11::reorder_alerts,
+            commands::reports_sprint11::prescription_history,
+            commands::reports_sprint11::sms_settings_get,
+            commands::sms::sms_send,
+            commands::sms::sms_settings_save,
+            // Tech Setup
+            commands::tech::tech_auth,
+            commands::tech::tech_setup_save,
+            commands::tech::tech_get_config,
+            commands::tech::tech_change_password,
         ])
         .run(tauri::generate_context!())
         .expect("PharmaCare Pro failed to start");
